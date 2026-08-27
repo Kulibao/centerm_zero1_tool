@@ -2,7 +2,11 @@
 
 这是铁牛 Zero1（RK3568）安装飞牛 OS 后使用的驱动修复组件，适用于因使用其他机型刷机包而需要补齐硬件功能的设备。
 
+仓库根目录只保留本说明文件和完整工具目录 `Zero1_tool_install/`。使用时请将该目录复制到 NAS 的 `/home/anna/Zero1_tool_install`。
+
 ## 目录结构
+
+以下内容位于 `Zero1_tool_install/` 内：
 
 - `install_all.sh`：统一安装脚本。
 - `uninstall_zero1_tool.sh`：卸载增强功能并恢复完整原版文件。
