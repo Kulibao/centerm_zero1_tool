@@ -2,7 +2,11 @@
 
 这是铁牛 Zero1（RK3568）安装飞牛 OS 后使用的驱动修复组件。
 
+修改于铁牛官方提供的驱动文件。
+
 仓库根目录只保留本说明文件和完整工具目录 `Zero1_tool_install/`。使用时请将该目录复制到 NAS 的 `/home/anna/Zero1_tool_install`。
+
+网页中的风扇设置和 SATA 指示灯设置分别保存，互不影响；宽屏时两栏并排，小屏时上下排列。
 
 ## 目录结构
 
@@ -15,7 +19,8 @@
 - `web/`：铁牛Zero1tool 网页后台，使用 BusyBox httpd 和 Shell CGI。
 - `zero1-tool-httpd.service`：网页后台服务，默认端口 9511。
 - `fan-control.conf`：风扇温控配置模板。
-- `original_files/`：从原始 `install` 目录复制的完整原版文件快照，不能删除。
+- `sata-led.conf`：SATA 指示灯配置模板，可控制硬盘休眠时是否慢闪。
+- `original_files/`：为铁牛官方驱动文件，不能删除。
 
 ## 安装
 
@@ -50,6 +55,8 @@ http://NAS_IP:9511/
 
 温控参数保存后会在一个检测周期内生效。网页使用未保存编辑保护，定时刷新状态时不会覆盖正在填写的参数。
 
+在“SATA 指示灯”区域可以选择硬盘休眠时绿色灯是否一亮一灭。关闭后休眠盘显示绿色常亮，其他 SATA 灯状态不变。
+
 ## 默认温控逻辑
 
 ```text
@@ -82,3 +89,4 @@ tail -n 80 /var/log/fan_control.log
 ```
 
 网页服务文件位于 `/usr/local/lib/zero1-tool/www/`，风扇配置位于 `/etc/zero1-tool/fan.conf`。
+SATA 指示灯配置位于 `/etc/zero1-tool/sata-led.conf`。
