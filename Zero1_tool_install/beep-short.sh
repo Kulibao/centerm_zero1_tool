@@ -1,6 +1,17 @@
 #!/bin/sh
 # 短促干净蜂鸣：优先厂商 gpio_ctrl，否则 GPIO0 line18（与 power-key 一致）
 LOGTAG=beep-short
+FORCE=0
+[ "${1:-}" = "--force" ] && FORCE=1
+
+# 网页可关闭开机蜂鸣；缺少配置时保持原版行为（默认开启）。
+if [ "$FORCE" -ne 1 ] && [ -r /etc/zero1-tool/buzzer.conf ]; then
+	boot_beep=$(sed -n 's/^BOOT_BEEP=//p' /etc/zero1-tool/buzzer.conf | tail -n 1)
+	if [ "$boot_beep" = "0" ]; then
+		logger -t "$LOGTAG" "boot beep disabled"
+		exit 0
+	fi
+fi
 
 if [ -w /sys/devices/platform/gpio_ctrl/buzzer_gpio ]; then
 	echo 'buzzer_en:2' > /sys/devices/platform/gpio_ctrl/buzzer_gpio

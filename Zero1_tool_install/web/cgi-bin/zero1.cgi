@@ -3,17 +3,44 @@ set -eu
 
 CONFIG=/etc/zero1-tool/fan.conf
 SATA_CONFIG=/etc/zero1-tool/sata-led.conf
+BUZZER_CONFIG=/etc/zero1-tool/buzzer.conf
 STATUS=/run/zero1-tool/fan-status.json
 LOG=/var/log/fan_control.log
+KERNEL_FIX=/home/anna/Zero1_tool_install/fnos_kernel_fix.sh
+KERNEL_FIX_DIR=/run/zero1-tool
+KERNEL_FIX_PID=${KERNEL_FIX_DIR}/kernel-fix.pid
+KERNEL_FIX_LOG=${KERNEL_FIX_DIR}/kernel-fix.log
+KERNEL_FIX_RESULT=${KERNEL_FIX_DIR}/kernel-fix.result
 
 header() { printf 'Content-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nStatus: %s\r\n\r\n' "${1:-200 OK}"; }
 error() { header "400 Bad Request"; printf '{"error":"%s"}\n' "$1"; exit 0; }
+conflict() { header "409 Conflict"; printf '{"error":"%s"}\n' "$1"; exit 0; }
 json_escape() { sed ':a;N;$!ba;s/\\/\\\\/g;s/"/\\"/g;s/\r//g;s/\n/\\n/g'; }
 get_value() { sed -n "s/^$1=//p" "$CONFIG" 2>/dev/null | tail -n 1; }
 get_sata_value() { sed -n "s/^$1=//p" "$SATA_CONFIG" 2>/dev/null | tail -n 1; }
+get_buzzer_value() { sed -n "s/^$1=//p" "$BUZZER_CONFIG" 2>/dev/null | tail -n 1; }
 is_uint() { case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac; }
 in_range() { is_uint "$1" && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
 urldecode() { printf '%b' "$(printf '%s' "$1" | sed 's/+/ /g;s/%/\\x/g')"; }
+kernel_fix_running() {
+  [ -s "$KERNEL_FIX_PID" ] || return 1
+  pid=$(cat "$KERNEL_FIX_PID" 2>/dev/null || true)
+  case "$pid" in ''|*[!0-9]*) return 1;; esac
+  kill -0 "$pid" 2>/dev/null
+}
+kernel_fix_json() {
+  running=false; kernel_fix_running && running=true
+  result='null'
+  if [ -s "$KERNEL_FIX_RESULT" ]; then
+    result=$(cat "$KERNEL_FIX_RESULT" 2>/dev/null | head -n 1)
+    is_uint "$result" || result='null'
+  fi
+  started=''
+  [ -s "${KERNEL_FIX_LOG}.started" ] && started=$(cat "${KERNEL_FIX_LOG}.started" 2>/dev/null | head -n 1 || true)
+  text=''
+  [ -r "$KERNEL_FIX_LOG" ] && text=$(tail -n 160 "$KERNEL_FIX_LOG" | json_escape)
+  printf '{"running":%s,"started_at":"%s","exit_code":%s,"text":"%s"}\n' "$running" "$started" "$result" "$text"
+}
 
 action=$(printf '%s' "${QUERY_STRING:-}" | sed -n 's/^action=\([^&]*\).*$/\1/p')
 case "$action" in
@@ -31,13 +58,36 @@ case "$action" in
     ;;
   config)
     header
-    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","CHECK_INTERVAL":"%s","STANDBY_BLINK":"%s"}\n' \
-      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$(get_value CHECK_INTERVAL)" "$(get_sata_value STANDBY_BLINK)"
+    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","CHECK_INTERVAL":"%s","STANDBY_BLINK":"%s","BOOT_BEEP":"%s"}\n' \
+      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$(get_value CHECK_INTERVAL)" "$(get_sata_value STANDBY_BLINK)" "$(get_buzzer_value BOOT_BEEP)"
     ;;
   logs)
     header
     if [ -r "$LOG" ]; then text=$(tail -n 80 "$LOG" | json_escape); else text=''; fi
     printf '{"text":"%s"}\n' "$text"
+    ;;
+  kernel_fix_start)
+    [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
+    [ -f "$KERNEL_FIX" ] || error '未找到内核修复脚本'
+    [ -x "$KERNEL_FIX" ] || chmod 755 "$KERNEL_FIX" 2>/dev/null || error '内核修复脚本不可执行'
+    kernel_fix_running && conflict '内核修复正在运行，请等待当前任务完成'
+    mkdir -p "$KERNEL_FIX_DIR"
+    : > "$KERNEL_FIX_LOG"
+    : > "$KERNEL_FIX_RESULT"
+    date '+%Y-%m-%d %H:%M:%S' > "${KERNEL_FIX_LOG}.started"
+    (
+      set +e
+      /bin/bash "$KERNEL_FIX" > "$KERNEL_FIX_LOG" 2>&1
+      rc=$?
+      printf '%s\n' "$rc" > "$KERNEL_FIX_RESULT"
+      rm -f "$KERNEL_FIX_PID"
+    ) >/dev/null 2>&1 &
+    printf '%s\n' "$!" > "$KERNEL_FIX_PID"
+    header; printf '{"ok":true,"message":"内核修复已启动"}\n'
+    ;;
+  kernel_fix_status)
+    header
+    kernel_fix_json
     ;;
   save_sata)
     [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
@@ -57,6 +107,37 @@ case "$action" in
     mv "$sata_tmp" "$SATA_CONFIG"
     systemctl kill -s HUP sata-led-manager.service 2>/dev/null || systemctl restart sata-led-manager.service 2>/dev/null || true
     header; printf '{"ok":true}\n'
+    ;;
+  save_buzzer)
+    [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
+    length=${CONTENT_LENGTH:-0}; in_range "$length" 1 1024 || error '请求大小无效'
+    body=$(dd bs=1 count="$length" 2>/dev/null)
+    BOOT_BEEP=''
+    oldifs=$IFS; IFS='&'
+    for item in $body; do
+      key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
+      case "$key" in
+        BOOT_BEEP) BOOT_BEEP="$value";;
+      esac
+    done
+    IFS=$oldifs
+    [ "$BOOT_BEEP" = 0 ] || [ "$BOOT_BEEP" = 1 ] || error '开机蜂鸣开关无效'
+    mkdir -p /etc/zero1-tool
+    buzzer_tmp="${BUZZER_CONFIG}.tmp.$$"
+    {
+      echo '# Managed by T-NAS Zero1tool'
+      echo "BOOT_BEEP=$BOOT_BEEP"
+    } > "$buzzer_tmp"
+    mv "$buzzer_tmp" "$BUZZER_CONFIG"
+    header; printf '{"ok":true}\n'
+    ;;
+  test_buzzer)
+    [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
+    if /usr/local/sbin/zero1-buzzer-test.sh >/dev/null 2>&1; then
+      header; printf '{"ok":true}\n'
+    else
+      error '蜂鸣器测试失败，请检查蜂鸣器节点或权限'
+    fi
     ;;
   save)
     [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'

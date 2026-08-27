@@ -4,9 +4,11 @@
 
 修改于铁牛官方提供的驱动文件。
 
-仓库根目录只保留本说明文件和完整工具目录 `Zero1_tool_install/`。使用时请将该目录复制到 NAS 的 `/home/anna/Zero1_tool_install`。
+当前版本号：`2608280204`
 
-网页中的风扇设置和 SATA 指示灯设置分别保存，互不影响；宽屏时两栏并排，小屏时上下排列。
+最新版本：[GitHub 项目仓库](https://github.com/Kulibao/centerm_zero1_tool)
+
+仓库根目录只保留本说明文件和完整工具目录 `Zero1_tool_install/`。使用时请将该目录复制到 NAS 的 `/home/anna/Zero1_tool_install`。
 
 ## 目录结构
 
@@ -17,9 +19,12 @@
 - `fan_temp_control.sh`：风扇温控脚本，支持 PWM 调速和 GPIO 回退。
 - `fan-control.service`：风扇控制服务。
 - `web/`：铁牛Zero1tool 网页后台，使用 BusyBox httpd 和 Shell CGI。
+- `zero1-buzzer-test.sh`：网页蜂鸣器“一声测试”入口，不执行关机。
+- `fnos_kernel_fix.sh`：飞牛内核更新后的 DTB、initramfs 和 RK3568 GPU 驱动修复脚本。
 - `zero1-tool-httpd.service`：网页后台服务，默认端口 9511。
 - `fan-control.conf`：风扇温控配置模板。
 - `sata-led.conf`：SATA 指示灯配置模板，可控制硬盘休眠时是否慢闪。
+- `buzzer.conf`：开机蜂鸣开关的配置模板。
 - `original_files/`：为铁牛官方驱动文件，不能删除。
 
 ## 安装
@@ -56,6 +61,16 @@ http://NAS_IP:9511/
 温控参数保存后会在一个检测周期内生效。网页使用未保存编辑保护，定时刷新状态时不会覆盖正在填写的参数。
 
 在“SATA 指示灯”区域可以选择硬盘休眠时绿色灯是否一亮一灭。关闭后休眠盘显示绿色常亮，其他 SATA 灯状态不变。
+
+在“蜂鸣器”区域可以开启或关闭开机蜂鸣，并使用“响一声测试”检查蜂鸣器。测试不会触发关机，也不受开机蜂鸣开关影响。
+
+内核更新后可执行：
+
+```sh
+sudo bash /home/anna/Zero1_tool_install/fnos_kernel_fix.sh
+```
+
+脚本会恢复 Zero1 的 DTB，刷新新内核的模块依赖，登记 `rkgpu_bifrost_jm` GPU 驱动，并将其加入 initramfs 和开机自动加载配置。
 
 ## 默认温控逻辑
 

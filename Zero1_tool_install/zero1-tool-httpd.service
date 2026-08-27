@@ -1,6 +1,6 @@
 [Unit]
 Description=T-NAS Zero1tool Web Backend
-After=local-fs.target fan-control.service
+After=local-fs.target
 Wants=fan-control.service
 
 [Service]

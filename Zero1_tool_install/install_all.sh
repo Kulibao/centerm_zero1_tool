@@ -38,6 +38,7 @@ mkdir -p /etc/triggerhappy/triggers.d
 
 install -m 755 "${DIR}/beep-short.sh" /usr/local/sbin/beep-short.sh
 install -m 644 "${DIR}/beep-boot.service" /etc/systemd/system/beep-boot.service
+install -m 755 "${DIR}/zero1-buzzer-test.sh" /usr/local/sbin/zero1-buzzer-test.sh
 
 install -m 755 "${DIR}/power-led-solid.sh" /usr/local/sbin/power-led-solid.sh
 install -m 644 "${DIR}/power-led-solid.service" /etc/systemd/system/power-led-solid.service
@@ -61,6 +62,9 @@ fi
 if [[ ! -f /etc/zero1-tool/sata-led.conf ]]; then
   install -m 644 "${DIR}/sata-led.conf" /etc/zero1-tool/sata-led.conf
 fi
+if [[ ! -f /etc/zero1-tool/buzzer.conf ]]; then
+  install -m 644 "${DIR}/buzzer.conf" /etc/zero1-tool/buzzer.conf
+fi
 install -d -m 755 /usr/local/lib/zero1-tool
 install -d -m 755 /usr/local/lib/zero1-tool/www/cgi-bin
 install -m 644 "${DIR}/web/index.html" /usr/local/lib/zero1-tool/www/index.html
@@ -82,6 +86,9 @@ systemctl daemon-reload
 
 # Keep old LED service disabled (replaced by sata-led-manager)
 systemctl disable --now HDled_monit_v0.service 2>/dev/null || true
+# This UART is not present on the Zero1 device; leaving its getty enabled adds
+# a long timeout while systemd waits for /dev/ttyAMA0 during boot.
+systemctl disable --now serial-getty@ttyAMA0.service 2>/dev/null || true
 # Remove the previous Python prototype service if it was installed earlier.
 systemctl disable --now zero1-tool.service 2>/dev/null || true
 rm -f /etc/systemd/system/zero1-tool.service

@@ -22,6 +22,19 @@ fi
 systemctl disable --now zero1-tool-httpd.service 2>/dev/null || true
 systemctl disable --now fan-control.service 2>/dev/null || true
 
+# Remove only the post-install hooks created by fnos_kernel_fix.sh. Kernel
+# files, initramfs images, and module configuration are intentionally kept.
+echo "Cleaning kernel-fix hooks..."
+for hook in \
+  /etc/kernel/postinst.d/10-zero1-gpu \
+  /etc/kernel/postinst.d/11-restore-dtb \
+  /etc/kernel/postinst.d/12-update-symlinks; do
+  if [[ -f "$hook" ]]; then
+    rm -f "$hook"
+    echo "Removed: $hook"
+  fi
+done
+
 restore() {
   local src="$1" dst="$2" mode="$3"
   if [[ -f "${ORIGINAL_ROOT}/${src}" ]]; then
@@ -34,6 +47,7 @@ restore() {
 
 restore beep-short.sh /usr/local/sbin/beep-short.sh 755
 restore beep-boot.service /etc/systemd/system/beep-boot.service 644
+rm -f /usr/local/sbin/zero1-buzzer-test.sh
 restore power-led-solid.sh /usr/local/sbin/power-led-solid.sh 755
 restore power-led-solid.service /etc/systemd/system/power-led-solid.service 644
 restore power-key.sh /usr/bin/power-key.sh 755
@@ -58,6 +72,8 @@ systemctl enable --now beep-boot.service 2>/dev/null || true
 systemctl enable --now power-led-solid.service 2>/dev/null || true
 systemctl enable --now sata-led-enable.service 2>/dev/null || true
 systemctl enable --now sata-led-manager.service 2>/dev/null || true
+# Restore the original serial login service when Zero1tool is removed.
+systemctl enable --now serial-getty@ttyAMA0.service 2>/dev/null || true
 systemctl disable --now fan-control.service 2>/dev/null || true
 systemctl enable --now fan-control.service 2>/dev/null || true
 if systemctl list-unit-files triggerhappy.service &>/dev/null; then systemctl restart triggerhappy.service || true; fi
