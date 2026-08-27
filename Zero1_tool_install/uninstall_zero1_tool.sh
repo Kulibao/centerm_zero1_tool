@@ -64,3 +64,9 @@ if systemctl list-unit-files triggerhappy.service &>/dev/null; then systemctl re
 
 echo
 echo "Zero1tool removed; all files from original_files were restored."
+read -r -p "Reboot now? [Y/N]: " reboot_answer
+if [[ "${reboot_answer}" =~ ^[Yy]$ ]]; then
+  reboot
+else
+  echo "Skip reboot."
+fi

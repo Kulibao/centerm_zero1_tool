@@ -2,6 +2,7 @@
 set -eu
 
 CONFIG=/etc/zero1-tool/fan.conf
+SATA_CONFIG=/etc/zero1-tool/sata-led.conf
 STATUS=/run/zero1-tool/fan-status.json
 LOG=/var/log/fan_control.log
 
@@ -9,6 +10,7 @@ header() { printf 'Content-Type: application/json; charset=utf-8\r\nCache-Contro
 error() { header "400 Bad Request"; printf '{"error":"%s"}\n' "$1"; exit 0; }
 json_escape() { sed ':a;N;$!ba;s/\\/\\\\/g;s/"/\\"/g;s/\r//g;s/\n/\\n/g'; }
 get_value() { sed -n "s/^$1=//p" "$CONFIG" 2>/dev/null | tail -n 1; }
+get_sata_value() { sed -n "s/^$1=//p" "$SATA_CONFIG" 2>/dev/null | tail -n 1; }
 is_uint() { case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac; }
 in_range() { is_uint "$1" && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
 urldecode() { printf '%b' "$(printf '%s' "$1" | sed 's/+/ /g;s/%/\\x/g')"; }
@@ -29,24 +31,44 @@ case "$action" in
     ;;
   config)
     header
-    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","CHECK_INTERVAL":"%s"}\n' \
-      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$(get_value CHECK_INTERVAL)"
+    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","CHECK_INTERVAL":"%s","STANDBY_BLINK":"%s"}\n' \
+      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$(get_value CHECK_INTERVAL)" "$(get_sata_value STANDBY_BLINK)"
     ;;
   logs)
     header
     if [ -r "$LOG" ]; then text=$(tail -n 80 "$LOG" | json_escape); else text=''; fi
     printf '{"text":"%s"}\n' "$text"
     ;;
+  save_sata)
+    [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
+    length=${CONTENT_LENGTH:-0}; in_range "$length" 1 1024 || error '请求大小无效'
+    body=$(dd bs=1 count="$length" 2>/dev/null)
+    SATA_STANDBY_BLINK=''
+    oldifs=$IFS; IFS='&'
+    for item in $body; do
+      key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
+      [ "$key" = SATA_STANDBY_BLINK ] && SATA_STANDBY_BLINK="$value"
+    done
+    IFS=$oldifs
+    [ "$SATA_STANDBY_BLINK" = 0 ] || [ "$SATA_STANDBY_BLINK" = 1 ] || error '休眠闪烁开关无效'
+    mkdir -p /etc/zero1-tool
+    sata_tmp="${SATA_CONFIG}.tmp.$$"
+    { echo '# Managed by T-NAS Zero1tool'; echo "STANDBY_BLINK=$SATA_STANDBY_BLINK"; } > "$sata_tmp"
+    mv "$sata_tmp" "$SATA_CONFIG"
+    systemctl kill -s HUP sata-led-manager.service 2>/dev/null || systemctl restart sata-led-manager.service 2>/dev/null || true
+    header; printf '{"ok":true}\n'
+    ;;
   save)
     [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
     length=${CONTENT_LENGTH:-0}; in_range "$length" 1 8192 || error '请求大小无效'
     body=$(dd bs=1 count="$length" 2>/dev/null)
-    MODE=''; MANUAL_SPEED=''; TEMP_OFF=''; TEMP_LOW=''; TEMP_FULL=''; TEMP_CRITICAL=''; FAN_DUTY_MIN=''; CHECK_INTERVAL=''
+    MODE=''; MANUAL_SPEED=''; TEMP_OFF=''; TEMP_LOW=''; TEMP_FULL=''; TEMP_CRITICAL=''; FAN_DUTY_MIN=''; CHECK_INTERVAL=''; SATA_STANDBY_BLINK="$(get_sata_value STANDBY_BLINK)"
+    [ "$SATA_STANDBY_BLINK" = 0 ] || SATA_STANDBY_BLINK=1
     oldifs=$IFS; IFS='&'
     for item in $body; do
       key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
       case "$key" in
-        MODE) MODE="$value";; MANUAL_SPEED) MANUAL_SPEED="$value";; TEMP_OFF) TEMP_OFF="$value";; TEMP_LOW) TEMP_LOW="$value";; TEMP_FULL) TEMP_FULL="$value";; TEMP_CRITICAL) TEMP_CRITICAL="$value";; FAN_DUTY_MIN) FAN_DUTY_MIN="$value";; CHECK_INTERVAL) CHECK_INTERVAL="$value";;
+        MODE) MODE="$value";; MANUAL_SPEED) MANUAL_SPEED="$value";; TEMP_OFF) TEMP_OFF="$value";; TEMP_LOW) TEMP_LOW="$value";; TEMP_FULL) TEMP_FULL="$value";; TEMP_CRITICAL) TEMP_CRITICAL="$value";; FAN_DUTY_MIN) FAN_DUTY_MIN="$value";; CHECK_INTERVAL) CHECK_INTERVAL="$value";; SATA_STANDBY_BLINK) SATA_STANDBY_BLINK="$value";;
       esac
     done
     IFS=$oldifs
@@ -58,6 +80,7 @@ case "$action" in
     in_range "$TEMP_CRITICAL" 33 105 || error '过热温度必须是33到105'
     in_range "$FAN_DUTY_MIN" 40 100 || error '最低占空比必须是40到100'
     in_range "$CHECK_INTERVAL" 1 30 || error '检测间隔必须是1到30秒'
+    [ "$SATA_STANDBY_BLINK" = 0 ] || [ "$SATA_STANDBY_BLINK" = 1 ] || error '休眠闪烁开关无效'
     [ "$TEMP_OFF" -lt "$TEMP_LOW" ] && [ "$TEMP_LOW" -lt "$TEMP_FULL" ] && [ "$TEMP_FULL" -le "$TEMP_CRITICAL" ] || error '温度阈值必须依次升高'
     mkdir -p /etc/zero1-tool
     tmp="${CONFIG}.tmp.$$"
@@ -68,7 +91,14 @@ case "$action" in
       echo "STARTUP_SPEED=$(get_value STARTUP_SPEED)"; echo "STARTUP_HOLD=$(get_value STARTUP_HOLD)"
     } > "$tmp"
     mv "$tmp" "$CONFIG"
+    sata_tmp="${SATA_CONFIG}.tmp.$$"
+    {
+      echo '# Managed by T-NAS Zero1tool'
+      echo "STANDBY_BLINK=$SATA_STANDBY_BLINK"
+    } > "$sata_tmp"
+    mv "$sata_tmp" "$SATA_CONFIG"
     systemctl kill -s HUP fan-control.service 2>/dev/null || systemctl restart fan-control.service 2>/dev/null || true
+    systemctl kill -s HUP sata-led-manager.service 2>/dev/null || systemctl restart sata-led-manager.service 2>/dev/null || true
     header; printf '{"ok":true}\n'
     ;;
   *) error '接口不存在';;

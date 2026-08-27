@@ -14,9 +14,26 @@ POWER_CHECK_INTERVAL=1    # hdparm power-state check; does not read SMART data
 LOOP_INTERVAL=0.2          # faster activity sampling / green LED flash rate
 SLOW_BLINK_TICKS=5         # 5 x 0.2s on, 5 x 0.2s off = approximately 0.5Hz
 HDPARM=/sbin/hdparm
+CONFIG_FILE=/etc/zero1-tool/sata-led.conf
+STANDBY_BLINK=1
+RELOAD_CONFIG=0
 
 SLOT1_PATH="/sys/devices/platform/fc400000.sata/ata*/host*/target*:*:*/*:*:*:*/block"
 SLOT2_PATH="/sys/devices/platform/fc800000.sata/ata*/host*/target*:*:*/*:*:*:*/block"
+
+load_config() {
+  local key value
+  [ -r "$CONFIG_FILE" ] || return 0
+  while IFS='=' read -r key value; do
+    key="${key//[[:space:]]/}"
+    value="${value//[[:space:]]/}"
+    case "$key" in
+      STANDBY_BLINK) [[ "$value" == 0 || "$value" == 1 ]] && STANDBY_BLINK="$value";;
+    esac
+  done < "$CONFIG_FILE"
+}
+
+handle_hup() { RELOAD_CONFIG=1; }
 
 ensure_gpio_out() {
   local n="$1" G="/sys/class/gpio/gpio$1"
@@ -71,6 +88,8 @@ slot_dev() {
 for g in "$R1" "$G1" "$R2" "$G2" "$SW"; do
   ensure_gpio_out "$g" || true
 done
+load_config
+trap handle_hup HUP
 [ -e "/sys/class/gpio/gpio$SW/value" ] && echo 1 > "/sys/class/gpio/gpio$SW/value" 2>/dev/null || true
 
 prev1=0
@@ -127,7 +146,11 @@ while true; do
       led_on "$R1";  led_off "$G1"
     elif (( smart_sleep1 == 1 )); then
       led_off "$R1"
-      if (( slow_phase == 0 )); then led_on "$G1"; else led_off "$G1"; fi
+      if (( STANDBY_BLINK == 1 )); then
+        if (( slow_phase == 0 )); then led_on "$G1"; else led_off "$G1"; fi
+      else
+        led_on "$G1"
+      fi
     else
       led_off "$R1"
       if (( prev1 > 0 && io1 > prev1 )); then
@@ -178,7 +201,11 @@ while true; do
       led_on "$R2";  led_off "$G2"
     elif (( smart_sleep2 == 1 )); then
       led_off "$R2"
-      if (( slow_phase == 0 )); then led_on "$G2"; else led_off "$G2"; fi
+      if (( STANDBY_BLINK == 1 )); then
+        if (( slow_phase == 0 )); then led_on "$G2"; else led_off "$G2"; fi
+      else
+        led_on "$G2"
+      fi
     else
       led_off "$R2"
       if (( prev2 > 0 && io2 > prev2 )); then
@@ -194,5 +221,9 @@ while true; do
     smart_bad2=0; smart_sleep2=0; last_smart_check2=0; last_power_check2=0
   fi
 
+  if (( RELOAD_CONFIG == 1 )); then
+    load_config
+    RELOAD_CONFIG=0
+  fi
   sleep "$LOOP_INTERVAL"
 done

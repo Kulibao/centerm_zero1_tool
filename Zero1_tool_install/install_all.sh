@@ -58,6 +58,9 @@ install -d -m 755 /etc/zero1-tool
 if [[ ! -f /etc/zero1-tool/fan.conf ]]; then
   install -m 644 "${DIR}/fan-control.conf" /etc/zero1-tool/fan.conf
 fi
+if [[ ! -f /etc/zero1-tool/sata-led.conf ]]; then
+  install -m 644 "${DIR}/sata-led.conf" /etc/zero1-tool/sata-led.conf
+fi
 install -d -m 755 /usr/local/lib/zero1-tool
 install -d -m 755 /usr/local/lib/zero1-tool/www/cgi-bin
 install -m 644 "${DIR}/web/index.html" /usr/local/lib/zero1-tool/www/index.html
