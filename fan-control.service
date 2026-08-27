@@ -1,0 +1,18 @@
+[Unit]
+Description=Centerm NAS RK3568 Fan Temperature Control
+After=multi-user.target
+Wants=network.target
+ConditionPathExists=/usr/local/bin/fan_temp_control.sh
+
+[Service]
+Type=simple              # 简单服务类型
+ExecStart=/usr/local/bin/fan_temp_control.sh auto
+Restart=always
+RestartSec=5
+User=root
+Group=root
+StandardOutput=append:/var/log/fan_control.log
+StandardError=append:/var/log/fan_control.log
+
+[Install]
+WantedBy=multi-user.target

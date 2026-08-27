@@ -1,0 +1,12 @@
+[Unit]
+Description=Set power LED green solid on boot
+After=local-fs.target systemd-udev-settle.service
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/power-led-solid.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

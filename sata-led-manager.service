@@ -1,0 +1,12 @@
+[Unit]
+Description=SATA LED manager (idle/activity/error)
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/sata-led-manager.sh
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

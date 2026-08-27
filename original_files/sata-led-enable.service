@@ -1,0 +1,13 @@
+[Unit]
+Description=Enable SATA LED power/switch GPIO
+DefaultDependencies=no
+After=local-fs.target systemd-udev-settle.service
+Before=sata-led-manager.service multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sata-led-enable.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

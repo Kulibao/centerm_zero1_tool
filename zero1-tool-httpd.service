@@ -1,0 +1,16 @@
+[Unit]
+Description=T-NAS Zero1tool Web Backend
+After=local-fs.target fan-control.service
+Wants=fan-control.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/zero1-tool/zero1-tool-httpd.sh
+Restart=always
+RestartSec=2
+User=root
+Group=root
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

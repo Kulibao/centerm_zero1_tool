@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>铁牛Zero1tool</title>
+  <style>
+    *{box-sizing:border-box}body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f3f5f7;color:#1f2937;margin:0}main{max-width:900px;margin:auto;padding:24px}h1{font-size:25px;margin:0}.bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}.pill{padding:6px 10px;border-radius:16px;background:#e5e7eb;font-size:13px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}.card{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px;box-shadow:0 1px 2px #0000000b}.label,.field label{font-size:13px;color:#6b7280}.value{font-size:28px;font-weight:650;margin-top:4px}.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.field label{display:block;margin-bottom:5px}.field input,.field select{width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:15px}.field input.invalid{border-color:#dc2626;background:#fff7f7}.hint{font-size:12px;color:#6b7280;margin-top:5px;line-height:1.45}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}button{border:0;border-radius:6px;padding:9px 13px;background:#2563eb;color:#fff;cursor:pointer}button.alt{background:#4b5563}button.warn{background:#dc2626}button:disabled{background:#9ca3af;cursor:not-allowed}#msg{margin-top:12px;color:#047857;min-height:20px}.muted{color:#6b7280;font-size:13px}.meaning{margin:0;padding-left:20px;line-height:1.8;color:#4b5563;font-size:14px}pre{white-space:pre-wrap;max-height:220px;overflow:auto;background:#111827;color:#d1fae5;padding:10px;border-radius:6px;font-size:12px}
+  </style>
+</head>
+<body><main>
+  <div class="bar"><h1>铁牛Zero1tool</h1><span id="service" class="pill">读取中</span></div>
+  <div class="grid">
+    <div class="card"><div class="label">CPU温度</div><div id="temp" class="value">-- °C</div></div>
+    <div class="card"><div class="label">当前转速档位</div><div id="speed" class="value">-- / 15</div></div>
+    <div class="card"><div class="label">PWM占空比</div><div id="duty" class="value">--%</div></div>
+    <div class="card"><div class="label">控制后端</div><div id="backend" class="value">--</div></div>
+  </div>
+  <section class="card" style="margin-top:14px"><h2>运行控制</h2><div class="form">
+    <div class="field"><label for="MODE">模式</label><select id="MODE" onchange="markDirty()"><option value="auto">自动温控</option><option value="manual">手动转速</option><option value="full">全速散热</option><option value="off">关闭风扇</option></select></div>
+    <div class="field"><label for="MANUAL_SPEED">手动档位（0-15）</label><input id="MANUAL_SPEED" type="number" min="0" max="15" oninput="markDirty();validateForm()"><div class="hint">仅在“手动转速”模式下使用。</div></div>
+  </div><div class="actions"><button onclick="save()">保存并立即生效</button><button class="alt" onclick="setMode('auto')">切换自动</button><button class="warn" onclick="setMode('full')">立即全速</button></div><div id="msg"></div></section>
+  <section class="card" style="margin-top:14px"><h2>温控参数</h2><div class="form">
+    <div class="field"><label for="TEMP_OFF">低于此温度关闭（°C）</label><input id="TEMP_OFF" type="number" min="30" max="75" oninput="markDirty();updateMeaning();validateForm()"><div class="hint">低于此温度时风扇关闭；达到此温度后风扇开始低速运行。</div></div>
+    <div class="field"><label for="TEMP_LOW">中速调速起点（°C）</label><input id="TEMP_LOW" type="number" min="31" max="80" oninput="markDirty();updateMeaning();validateForm()"><div class="hint">达到此温度后，风扇从低速进入逐步加速。</div></div>
+    <div class="field"><label for="TEMP_FULL">全速起点（°C）</label><input id="TEMP_FULL" type="number" min="32" max="90" oninput="markDirty();updateMeaning();validateForm()"><div class="hint">达到此温度后，风扇全速运行。</div></div>
+    <div class="field"><label for="TEMP_CRITICAL">过热保护（°C）</label><input id="TEMP_CRITICAL" type="number" min="33" max="105" oninput="markDirty();updateMeaning();validateForm()"><div class="hint">达到此温度时强制全速，忽略其他模式。</div></div>
+    <div class="field"><label for="FAN_DUTY_MIN">最低启动占空比（%）</label><input id="FAN_DUTY_MIN" type="number" min="40" max="100" oninput="markDirty();updateMeaning();validateForm()"><div class="hint">风扇开始转动时的最低 PWM 功率。</div></div>
+    <div class="field"><label for="CHECK_INTERVAL">检测间隔（秒）</label><input id="CHECK_INTERVAL" type="number" min="1" max="30" oninput="markDirty();updateMeaning();validateForm()"><div class="hint">温度读取和调速的间隔时间。</div></div>
+  </div><div id="meaning" class="card" style="margin-top:14px;background:#f8fafc;border-color:#dbeafe"><h3 style="margin:0 0 6px;font-size:16px">当前温控逻辑</h3><ul class="meaning"><li id="meaningOff"></li><li id="meaningLow"></li><li id="meaningFull"></li><li id="meaningCritical"></li><li id="meaningDuty"></li><li id="meaningInterval"></li></ul></div><p class="muted">保存后通常会在一个检测周期内生效。</p></section>
+  <section class="card" style="margin-top:14px"><h2>最近日志</h2><pre id="logs">读取中...</pre></section>
+</main><script>
+const ids=['MODE','MANUAL_SPEED','TEMP_OFF','TEMP_LOW','TEMP_FULL','TEMP_CRITICAL','FAN_DUTY_MIN','CHECK_INTERVAL'];
+let formDirty=false;
+function msg(t,bad){const e=document.getElementById('msg');e.textContent=t;e.style.color=bad?'#b91c1c':'#047857'}
+function markDirty(){formDirty=true;const e=document.getElementById('msg');if(e&&!e.textContent)e.textContent='有未保存的修改'}
+function n(id){const v=Number(document.getElementById(id).value);return Number.isFinite(v)?v:null}
+function updateMeaning(){const off=n('TEMP_OFF'),low=n('TEMP_LOW'),full=n('TEMP_FULL'),critical=n('TEMP_CRITICAL'),duty=n('FAN_DUTY_MIN'),interval=n('CHECK_INTERVAL');meaningOff.textContent=off===null?'低于关闭温度时关闭风扇。':`低于 ${off}°C：关闭风扇。`;meaningLow.textContent=(off===null||low===null)?'关闭温度以上、进入中速调速起点前：低速运行。':`${off}°C 至 ${low-1}°C：低速运行（最低占空比约 ${duty??'--'}%），不是到 ${low}°C 才开始转。`;meaningFull.textContent=full===null?'达到全速起点后：风扇全速运行。':`达到 ${full}°C：风扇全速运行。`;meaningCritical.textContent=critical===null?'达到过热保护温度：强制全速。':`达到 ${critical}°C：触发过热保护，强制全速。`;meaningDuty.textContent=duty===null?'最低启动占空比用于保证风扇能可靠启动。':`最低启动占空比 ${duty}%：风扇开始转动时使用的最低 PWM 功率。`;meaningInterval.textContent=interval===null?'检测间隔决定温度读取和调速频率。':`每 ${interval} 秒读取一次温度并调整转速。`}
+function validateForm(){const off=n('TEMP_OFF'),low=n('TEMP_LOW'),full=n('TEMP_FULL'),critical=n('TEMP_CRITICAL');const bad=[];[['TEMP_OFF',off,30,75],['TEMP_LOW',low,31,80],['TEMP_FULL',full,32,90],['TEMP_CRITICAL',critical,33,105],['MANUAL_SPEED',n('MANUAL_SPEED'),0,15],['FAN_DUTY_MIN',n('FAN_DUTY_MIN'),40,100],['CHECK_INTERVAL',n('CHECK_INTERVAL'),1,30]].forEach(([id,v,min,max])=>{const e=document.getElementById(id);const invalid=v===null||v<min||v>max;e.classList.toggle('invalid',invalid);if(invalid)bad.push(id)});if(off!==null&&low!==null&&low<=off)bad.push('TEMP_LOW');if(low!==null&&full!==null&&full<=low)bad.push('TEMP_FULL');if(full!==null&&critical!==null&&critical<full)bad.push('TEMP_CRITICAL');const b=document.querySelector('button[onclick="save()"]');if(b)b.disabled=bad.length>0;return bad.length===0}
+async function api(action,opt){const r=await fetch('/cgi-bin/zero1.cgi?action='+action,opt);const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'请求失败');return d}
+async function refresh(){try{const [s,c,l]=await Promise.all([api('status'),api('config'),api('logs')]);temp.textContent=(s.temperature??'--')+' °C';speed.textContent=(s.speed??'--')+' / 15';duty.textContent=(s.duty_percent??'--')+'%';backend.textContent=s.backend||'--';service.textContent=s.service==='active'?'服务运行':'服务异常';if(!formDirty)ids.forEach(i=>{if(c[i]!==undefined)document.getElementById(i).value=c[i]});updateMeaning();validateForm();logs.textContent=l.text||'暂无日志'}catch(e){msg('读取失败：'+e.message,true)}}
+async function save(){if(!validateForm()){msg('请先修正红框中的参数，温度阈值必须依次升高。',true);return}const p=new URLSearchParams();ids.forEach(i=>p.set(i,document.getElementById(i).value));try{await api('save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p});formDirty=false;msg('已保存，风扇控制正在更新');refresh()}catch(e){msg('保存失败：'+e.message,true)}}
+async function setMode(m){MODE.value=m;await save()}updateMeaning();validateForm();refresh();setInterval(refresh,3000);
+</script></body></html>

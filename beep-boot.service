@@ -1,0 +1,13 @@
+[Unit]
+Description=Boot short beep (same pulse as power-key / buzzer-test step 2)
+After=local-fs.target systemd-udev-settle.service
+# 尽早进入多用户阶段时响一声，不阻塞网络等
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/beep-short.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
