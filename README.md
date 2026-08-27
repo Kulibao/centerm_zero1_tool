@@ -1,6 +1,6 @@
 # 铁牛 Zero1 Tool
 
-这是铁牛 Zero1（RK3568）安装飞牛 OS 后使用的驱动修复组件，适用于因使用其他机型刷机包而需要补齐硬件功能的设备。
+这是铁牛 Zero1（RK3568）安装飞牛 OS 后使用的驱动修复组件。
 
 ## 目录结构
 
@@ -8,7 +8,7 @@
 - `uninstall_zero1_tool.sh`：卸载增强功能并恢复完整原版文件。
 - `fan_temp_control.sh`：风扇温控脚本，支持 PWM 调速和 GPIO 回退。
 - `fan-control.service`：风扇控制服务。
-- `web/`：铁牛Zero1tool 网页后台，使用 BusyBox httpd 和 Shell CGI，不需要 Python。
+- `web/`：铁牛Zero1tool 网页后台，使用 BusyBox httpd 和 Shell CGI。
 - `zero1-tool-httpd.service`：网页后台服务，默认端口 9511。
 - `fan-control.conf`：风扇温控配置模板。
 - `original_files/`：从原始 `install` 目录复制的完整原版文件快照，不能删除。
