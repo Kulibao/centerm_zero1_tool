@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# FnOS Kernel Upgrade Fix Script (v4)
+# FnOS Kernel Upgrade Fix Script (v6)
 # Device: NanoPi R5S (RK3568) + FnOS
 #
 # Modes:
@@ -84,7 +84,7 @@ fi
 # 阶段 1：检测内核
 # ==============================================
 echo "=============================================="
-echo " FnOS Kernel Upgrade Fix Script v4"
+echo " FnOS Kernel Upgrade Fix Script v6"
 echo "=============================================="
 
 ALL_KERNELS=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||' | sort -V)

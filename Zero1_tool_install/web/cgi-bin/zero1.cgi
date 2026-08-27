@@ -11,6 +11,10 @@ KERNEL_FIX_DIR=/run/zero1-tool
 KERNEL_FIX_PID=${KERNEL_FIX_DIR}/kernel-fix.pid
 KERNEL_FIX_LOG=${KERNEL_FIX_DIR}/kernel-fix.log
 KERNEL_FIX_RESULT=${KERNEL_FIX_DIR}/kernel-fix.result
+NPU_FIX=/home/anna/Zero1_tool_install/fnos_npu_fix.sh
+NPU_FIX_PID=${KERNEL_FIX_DIR}/npu-fix.pid
+NPU_FIX_LOG=${KERNEL_FIX_DIR}/npu-fix.log
+NPU_FIX_RESULT=${KERNEL_FIX_DIR}/npu-fix.result
 
 header() { printf 'Content-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nStatus: %s\r\n\r\n' "${1:-200 OK}"; }
 error() { header "400 Bad Request"; printf '{"error":"%s"}\n' "$1"; exit 0; }
@@ -39,6 +43,25 @@ kernel_fix_json() {
   [ -s "${KERNEL_FIX_LOG}.started" ] && started=$(cat "${KERNEL_FIX_LOG}.started" 2>/dev/null | head -n 1 || true)
   text=''
   [ -r "$KERNEL_FIX_LOG" ] && text=$(tail -n 160 "$KERNEL_FIX_LOG" | json_escape)
+  printf '{"running":%s,"started_at":"%s","exit_code":%s,"text":"%s"}\n' "$running" "$started" "$result" "$text"
+}
+npu_fix_running() {
+  [ -s "$NPU_FIX_PID" ] || return 1
+  pid=$(cat "$NPU_FIX_PID" 2>/dev/null || true)
+  case "$pid" in ''|*[!0-9]*) return 1;; esac
+  kill -0 "$pid" 2>/dev/null
+}
+npu_fix_json() {
+  running=false; npu_fix_running && running=true
+  result='null'
+  if [ -s "$NPU_FIX_RESULT" ]; then
+    result=$(cat "$NPU_FIX_RESULT" 2>/dev/null | head -n 1)
+    is_uint "$result" || result='null'
+  fi
+  started=''
+  [ -s "${NPU_FIX_LOG}.started" ] && started=$(cat "${NPU_FIX_LOG}.started" 2>/dev/null | head -n 1 || true)
+  text=''
+  [ -r "$NPU_FIX_LOG" ] && text=$(tail -n 160 "$NPU_FIX_LOG" | json_escape)
   printf '{"running":%s,"started_at":"%s","exit_code":%s,"text":"%s"}\n' "$running" "$started" "$result" "$text"
 }
 
@@ -71,6 +94,7 @@ case "$action" in
     [ -f "$KERNEL_FIX" ] || error '未找到内核修复脚本'
     [ -x "$KERNEL_FIX" ] || chmod 755 "$KERNEL_FIX" 2>/dev/null || error '内核修复脚本不可执行'
     kernel_fix_running && conflict '内核修复正在运行，请等待当前任务完成'
+    npu_fix_running && conflict 'NPU修复正在运行，不能同时执行内核修复'
     mkdir -p "$KERNEL_FIX_DIR"
     : > "$KERNEL_FIX_LOG"
     : > "$KERNEL_FIX_RESULT"
@@ -88,6 +112,30 @@ case "$action" in
   kernel_fix_status)
     header
     kernel_fix_json
+    ;;
+  npu_fix_start)
+    [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
+    [ -f "$NPU_FIX" ] || error '未找到NPU修复脚本'
+    [ -x "$NPU_FIX" ] || chmod 755 "$NPU_FIX" 2>/dev/null || error 'NPU修复脚本不可执行'
+    npu_fix_running && conflict 'NPU修复正在运行，请等待设备重启'
+    kernel_fix_running && conflict '内核修复正在运行，不能同时执行NPU修复'
+    mkdir -p "$KERNEL_FIX_DIR"
+    : > "$NPU_FIX_LOG"
+    : > "$NPU_FIX_RESULT"
+    date '+%Y-%m-%d %H:%M:%S' > "${NPU_FIX_LOG}.started"
+    (
+      set +e
+      /bin/bash "$NPU_FIX" > "$NPU_FIX_LOG" 2>&1
+      rc=$?
+      printf '%s\n' "$rc" > "$NPU_FIX_RESULT"
+      rm -f "$NPU_FIX_PID"
+    ) >/dev/null 2>&1 &
+    printf '%s\n' "$!" > "$NPU_FIX_PID"
+    header; printf '{"ok":true,"message":"NPU修复已启动，完成后设备将自动重启"}\n'
+    ;;
+  npu_fix_status)
+    header
+    npu_fix_json
     ;;
   save_sata)
     [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'

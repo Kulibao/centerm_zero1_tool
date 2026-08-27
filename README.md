@@ -4,7 +4,7 @@
 
 修改于铁牛官方提供的驱动文件。
 
-当前版本号：`2608280204`
+当前版本号：`2608280340`
 
 最新版本：[GitHub 项目仓库](https://github.com/Kulibao/centerm_zero1_tool)
 
@@ -21,6 +21,7 @@
 - `web/`：铁牛Zero1tool 网页后台，使用 BusyBox httpd 和 Shell CGI。
 - `zero1-buzzer-test.sh`：网页蜂鸣器“一声测试”入口，不执行关机。
 - `fnos_kernel_fix.sh`：飞牛内核更新后的 DTB、initramfs 和 RK3568 GPU 驱动修复脚本。
+- `fnos_npu_fix.sh`：RK3568 NPU 修复脚本，修复完成后自动重启设备。
 - `zero1-tool-httpd.service`：网页后台服务，默认端口 9511。
 - `fan-control.conf`：风扇温控配置模板。
 - `sata-led.conf`：SATA 指示灯配置模板，可控制硬盘休眠时是否慢闪。
@@ -70,7 +71,15 @@ http://NAS_IP:9511/
 sudo bash /home/anna/Zero1_tool_install/fnos_kernel_fix.sh
 ```
 
-脚本会恢复 Zero1 的 DTB，刷新新内核的模块依赖，登记 `rkgpu_bifrost_jm` GPU 驱动，并将其加入 initramfs 和开机自动加载配置。
+内核修复脚本会恢复 Zero1 的 DTB，刷新新内核的模块依赖，登记 `rkgpu_bifrost_jm` GPU 驱动，并将其加入 initramfs 和开机自动加载配置。
+
+NPU 修复前请先在飞牛应用商店安装“AI 引擎 (RK356X)”，然后执行：
+
+```sh
+sudo bash /home/anna/Zero1_tool_install/fnos_npu_fix.sh
+```
+
+NPU 修复会启用设备树节点并配置 `rknpu` 驱动开机自动加载；完成后会自动重启设备，请提前保存文件。
 
 ## 默认温控逻辑
 

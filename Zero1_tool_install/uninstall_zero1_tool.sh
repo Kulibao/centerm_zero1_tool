@@ -28,7 +28,8 @@ echo "Cleaning kernel-fix hooks..."
 for hook in \
   /etc/kernel/postinst.d/10-zero1-gpu \
   /etc/kernel/postinst.d/11-restore-dtb \
-  /etc/kernel/postinst.d/12-update-symlinks; do
+  /etc/kernel/postinst.d/12-update-symlinks \
+  /etc/kernel/postinst.d/13-zero1-npu; do
   if [[ -f "$hook" ]]; then
     rm -f "$hook"
     echo "Removed: $hook"
@@ -72,8 +73,9 @@ systemctl enable --now beep-boot.service 2>/dev/null || true
 systemctl enable --now power-led-solid.service 2>/dev/null || true
 systemctl enable --now sata-led-enable.service 2>/dev/null || true
 systemctl enable --now sata-led-manager.service 2>/dev/null || true
-# Restore the original serial login service when Zero1tool is removed.
-systemctl enable --now serial-getty@ttyAMA0.service 2>/dev/null || true
+# Restore the original enabled state without starting it immediately. The
+# device is absent on Zero1, so --now would block while systemd waits for it.
+systemctl enable serial-getty@ttyAMA0.service 2>/dev/null || true
 systemctl disable --now fan-control.service 2>/dev/null || true
 systemctl enable --now fan-control.service 2>/dev/null || true
 if systemctl list-unit-files triggerhappy.service &>/dev/null; then systemctl restart triggerhappy.service || true; fi
