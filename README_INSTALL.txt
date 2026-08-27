@@ -1,66 +1,61 @@
-Unified install package for this RK3568 machine
-=============================================
+铁牛 Zero1 Tool 安装说明
+========================
 
-Included components
--------------------
-- Device tree:
-  - rk3568-nanopi-r5s-new.dtb
-- Buzzer:
-  - beep-short.sh
-  - beep-boot.service
-  - power-key.sh
-  - triggerhappy-power-key.conf
-  - buzzer-test.sh
-- Power LED:
-  - power-led-solid.sh
-  - power-led-solid.service
-- SATA LEDs:
-  - sata-led-enable.sh
-  - sata-led-enable.service
-  - sata-led-manager.sh
-  - sata-led-manager.service
-  - SMART health checks use standby-safe mode and are limited to once every 5 minutes; standby indication uses the non-waking "/sbin/hdparm -C" power-state query.
-  - LED policy: normal idle is solid green; disk standby is slow green blink; disk activity is fast green blink; SMART failure is solid red; empty slot is slow red blink.
-- Fan:
-  - fan_temp_control.sh
-  - fan-control.service
-  - Temperature policy: below 50C off, 50-55C low speed, 55-70C medium speed, 70C and above full speed.
+本目录是铁牛 Zero1（RK3568）安装飞牛 OS 后使用的驱动修复组件。
 
-Install on target machine
--------------------------
-1) Copy this whole folder to the target machine as exactly:
-   /home/anna/Zero1_tool_install
-2) Run:
-   sudo bash /home/anna/Zero1_tool_install/install_all.sh
-3) Reboot:
-   sudo reboot
+一、固定安装目录
+----------------
+必须将整个目录复制到飞牛 NAS：
 
-Web management
---------------
-- Open http://NAS_IP:9511/ after installation.
-- Page title: T-NAS Zero1tool (Chinese UI: 铁牛Zero1tool).
-- Supports automatic, manual, full-speed and off modes.
-- Temperature thresholds and manual speed are saved to /etc/zero1-tool/fan.conf
-  and applied to fan-control.service within one control interval.
-- Fan control uses the original multi-user startup timing. It uses full speed
-  whenever the temperature reading is unavailable, then changes to the selected
-  mode after a valid reading is obtained.
-- Runtime status: /run/zero1-tool/fan-status.json
-- Web service: zero1-tool-httpd.service
-- The web backend uses BusyBox httpd and shell CGI; Python is not required.
-- The old Python prototype files are not included.
-- If port 9511 cannot be opened, check:
-  systemctl status zero1-tool-httpd.service --no-pager
-  journalctl -u zero1-tool-httpd.service -n 50 --no-pager
-  ss -ltnp | grep 9511
-  command -v busybox; command -v httpd
+  /home/anna/Zero1_tool_install
 
-Notes
------
-- install_all.sh backs up existing DTB as:
-  /boot/dtb/rockchip/rk3568-nanopi-r5s.dtb.bak_YYYYmmdd_HHMMSS
-- SATA LED manager replaces HDled_monit_v0.service.
-- The installer refuses to run unless its directory is /home/anna/Zero1_tool_install.
-- original_files/ is a complete copy of the original install package. To remove this
-  version and restore every original script/service, run:
+安装脚本会检查固定路径，路径不正确时不会继续执行。
+
+二、安装
+--------
+通过 SSH 执行：
+
+  sudo bash /home/anna/Zero1_tool_install/install_all.sh
+
+脚本会安装设备树、蜂鸣器、电源键、电源灯、SATA 灯和风扇控制，并启用网页后台。
+
+三、网页后台
+------------
+安装后访问：
+
+  http://NAS_IP:9511/
+
+网页名称：铁牛Zero1tool
+网页后台使用 BusyBox httpd 和 Shell CGI，不需要 Python。
+可查看温度、风扇档位、PWM 占空比和日志，并调整自动温控、手动转速、全速散热和关闭风扇模式。
+
+四、默认温控逻辑
+----------------
+  低于 50°C：关闭风扇
+  达到 50°C：开始低速运行
+  达到 55°C：进入中速逐步调速
+  达到 70°C：全速运行
+  达到 90°C：过热保护，强制全速
+
+风扇启动阶段先使用最高速；温度读取失败时保持最高速，读取到有效温度后再自动调速。
+
+五、卸载与恢复原版
+------------------
+执行：
+
   sudo bash /home/anna/Zero1_tool_install/uninstall_zero1_tool.sh
+
+卸载脚本会删除网页后台、配置和运行目录，并从 original_files/ 恢复全部原版脚本、service 和 DTB。
+original_files/ 是完整原版快照，请勿删除或修改。
+
+六、常用检查
+------------
+  systemctl status fan-control.service --no-pager
+  systemctl status zero1-tool-httpd.service --no-pager
+  ss -ltnp | grep 9511
+  tail -n 80 /var/log/fan_control.log
+
+主要运行路径：
+  网页文件：/usr/local/lib/zero1-tool/www/
+  风扇配置：/etc/zero1-tool/fan.conf
+  风扇日志：/var/log/fan_control.log
