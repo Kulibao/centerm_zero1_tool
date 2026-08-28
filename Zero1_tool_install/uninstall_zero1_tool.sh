@@ -36,6 +36,26 @@ for hook in \
   fi
 done
 
+# Remove NPU-specific boot/module additions made by fnos_npu_fix.sh.
+if [[ -f /etc/modules-load.d/zero1-npu.conf ]]; then
+  rm -f /etc/modules-load.d/zero1-npu.conf
+  echo "Removed: /etc/modules-load.d/zero1-npu.conf"
+fi
+if [[ -f /etc/initramfs-tools/modules ]]; then
+  sed -i '/^rknpu$/d' /etc/initramfs-tools/modules
+fi
+if [[ -f /boot/extlinux/extlinux.conf ]]; then
+  # Remove only the CMA value introduced by Zero1tool; keep other boot args.
+  sed -i -E 's/[[:space:]]+cma=256M([[:space:]]|$)/\1/g' /boot/extlinux/extlinux.conf
+  echo "Removed: cma=256M from /boot/extlinux/extlinux.conf (if present)"
+fi
+for backup in /boot/dtb/rockchip/rk3568-nanopi-r5s.dtb.bak_npu_*; do
+  if [[ -f "$backup" ]]; then
+    rm -f "$backup"
+    echo "Removed: $backup"
+  fi
+done
+
 restore() {
   local src="$1" dst="$2" mode="$3"
   if [[ -f "${ORIGINAL_ROOT}/${src}" ]]; then

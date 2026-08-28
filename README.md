@@ -4,7 +4,7 @@
 
 修改于铁牛官方提供的驱动文件。
 
-当前版本号：`2608280340`
+当前版本号：`2608281416`
 
 最新版本：[GitHub 项目仓库](https://github.com/Kulibao/centerm_zero1_tool)
 
