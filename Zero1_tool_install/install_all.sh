@@ -7,6 +7,7 @@ set -euo pipefail
 # - Power LED solid green
 # - SATA LED policy (idle green, io blink, error red)
 # - Fan control service + Zero1tool web backend
+# - LVM pre-activation before trim_init.service
 # - Author: chenfm
 # - Date: 2026-06-18
 
@@ -26,6 +27,12 @@ ORIGINAL_ROOT="${DIR}/original_files"
 for original_name in beep-boot.service beep-short.sh buzzer-test.sh fan_temp_control.sh fan-control.service install_all.sh power-key.sh power-led-solid.service power-led-solid.sh README_INSTALL.txt rk3568-nanopi-r5s-new.dtb sata-led-enable.service sata-led-enable.sh sata-led-manager.service sata-led-manager.sh triggerhappy-power-key.conf; do
   if [[ ! -f "${ORIGINAL_ROOT}/${original_name}" ]]; then
     echo "Missing original_files/${original_name}; installation stopped."
+    exit 1
+  fi
+done
+for required_name in zero1-lvm-activate.sh zero1-lvm-activate.service trim-init-lvm-activate.conf; do
+  if [[ ! -f "${DIR}/${required_name}" ]]; then
+    echo "Missing ${required_name}; installation stopped."
     exit 1
   fi
 done
@@ -72,6 +79,11 @@ install -m 755 "${DIR}/web/cgi-bin/zero1.cgi" /usr/local/lib/zero1-tool/www/cgi-
 install -m 755 "${DIR}/zero1-tool-httpd.sh" /usr/local/lib/zero1-tool/zero1-tool-httpd.sh
 install -m 644 "${DIR}/zero1-tool-httpd.service" /etc/systemd/system/zero1-tool-httpd.service
 
+install -m 755 "${DIR}/zero1-lvm-activate.sh" /usr/local/sbin/zero1-lvm-activate.sh
+install -m 644 "${DIR}/zero1-lvm-activate.service" /etc/systemd/system/zero1-lvm-activate.service
+install -d -m 755 /etc/systemd/system/trim_init.service.d
+install -m 644 "${DIR}/trim-init-lvm-activate.conf" /etc/systemd/system/trim_init.service.d/10-zero1-lvm-activate.conf
+
 if [[ -f "${SRC_DTB}" ]]; then
   if [[ -f "${DST_DTB}" ]]; then
     cp -a "${DST_DTB}" "${DST_DTB}.bak_${TS}"
@@ -83,6 +95,10 @@ else
 fi
 
 systemctl daemon-reload
+
+# Run once during installation and on every boot before trim_init.service.
+systemctl enable zero1-lvm-activate.service
+systemctl restart zero1-lvm-activate.service
 
 # Keep old LED service disabled (replaced by sata-led-manager)
 systemctl disable --now HDled_monit_v0.service 2>/dev/null || true

@@ -1,0 +1,14 @@
+[Unit]
+Description=T-NAS Zero1 LVM Pre-activation
+Wants=systemd-udev-settle.service lvm2-monitor.service
+After=systemd-udev-settle.service lvm2-monitor.service
+Before=trim_init.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zero1-lvm-activate.sh
+RemainAfterExit=yes
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

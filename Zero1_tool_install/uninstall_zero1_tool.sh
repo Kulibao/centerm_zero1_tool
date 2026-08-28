@@ -21,6 +21,7 @@ fi
 
 systemctl disable --now zero1-tool-httpd.service 2>/dev/null || true
 systemctl disable --now fan-control.service 2>/dev/null || true
+systemctl disable --now zero1-lvm-activate.service 2>/dev/null || true
 
 # Remove only the post-install hooks created by fnos_kernel_fix.sh. Kernel
 # files, initramfs images, and module configuration are intentionally kept.
@@ -86,7 +87,12 @@ if [[ -f "${ORIGINAL_ROOT}/rk3568-nanopi-r5s-new.dtb" && -d /boot/dtb/rockchip ]
   echo "Restored: /boot/dtb/rockchip/rk3568-nanopi-r5s.dtb"
 fi
 
-rm -f /etc/systemd/system/zero1-tool.service /etc/systemd/system/zero1-tool-httpd.service
+rm -f /etc/systemd/system/zero1-tool.service \
+  /etc/systemd/system/zero1-tool-httpd.service \
+  /etc/systemd/system/zero1-lvm-activate.service \
+  /etc/systemd/system/trim_init.service.d/10-zero1-lvm-activate.conf \
+  /usr/local/sbin/zero1-lvm-activate.sh
+rmdir /etc/systemd/system/trim_init.service.d 2>/dev/null || true
 rm -rf /usr/local/lib/zero1-tool /etc/zero1-tool /run/zero1-tool
 systemctl daemon-reload
 systemctl enable --now beep-boot.service 2>/dev/null || true

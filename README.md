@@ -4,7 +4,7 @@
 
 修改于铁牛官方提供的驱动文件。
 
-当前版本号：`2608281416`
+当前版本号：`2608281500`
 
 最新版本：[GitHub 项目仓库](https://github.com/Kulibao/centerm_zero1_tool)
 
@@ -22,6 +22,9 @@
 - `zero1-buzzer-test.sh`：网页蜂鸣器“一声测试”入口，不执行关机。
 - `fnos_kernel_fix.sh`：飞牛内核更新后的 DTB、initramfs 和 RK3568 GPU 驱动修复脚本。
 - `fnos_npu_fix.sh`：RK3568 NPU 修复脚本，修复完成后自动重启设备。
+- `zero1-lvm-activate.sh`：开机时在 `trim_init.service` 前主动激活 LVM 卷组，减少数据卷未及时出现导致的启动等待。
+- `zero1-lvm-activate.service`：LVM 预激活脚本的 systemd 服务。
+- `trim-init-lvm-activate.conf`：确保 `trim_init.service` 明确等待 LVM 预激活完成。
 - `zero1-tool-httpd.service`：网页后台服务，默认端口 9511。
 - `fan-control.conf`：风扇温控配置模板。
 - `sata-led.conf`：SATA 指示灯配置模板，可控制硬盘休眠时是否慢闪。
