@@ -4,7 +4,7 @@
 
 修改于铁牛官方提供的驱动文件。
 
-当前版本号：`2608281500`
+当前版本号：`2609062230`
 
 最新版本：[GitHub 项目仓库](https://github.com/Kulibao/centerm_zero1_tool)
 
@@ -27,6 +27,8 @@
 - `trim-init-lvm-activate.conf`：确保 `trim_init.service` 明确等待 LVM 预激活完成。
 - `zero1-tool-httpd.service`：网页后台服务，默认端口 9511。
 - `fan-control.conf`：风扇温控配置模板。
+- `LOG_RETENTION_DAYS`：风扇日志按天归档后的保留天数，默认 3 天，可在网页“日志设置”中调整为 1-30 天。
+- `LOG_ENABLED`：风扇日志开关，默认开启；关闭后不再写入新的风扇日志。
 - `sata-led.conf`：SATA 指示灯配置模板，可控制硬盘休眠时是否慢闪。
 - `buzzer.conf`：开机蜂鸣开关的配置模板。
 - `original_files/`：为铁牛官方驱动文件，不能删除。
@@ -63,6 +65,10 @@ http://NAS_IP:9511/
 - 关闭风扇
 
 温控参数保存后会在一个检测周期内生效。网页使用未保存编辑保护，定时刷新状态时不会覆盖正在填写的参数。
+
+风扇日志会按天保存为 `/var/log/fan_control.log.YYYY-MM-DD`，当前日志仍写入 `/var/log/fan_control.log`。超过网页设置保留天数的归档会自动删除，默认保留 3 天。
+
+网页“日志设置”可以关闭日志，或在确认后删除当前日志及全部按天归档；删除操作不可恢复。
 
 在“SATA 指示灯”区域可以选择硬盘休眠时绿色灯是否一亮一灭。关闭后休眠盘显示绿色常亮，其他 SATA 灯状态不变。
 

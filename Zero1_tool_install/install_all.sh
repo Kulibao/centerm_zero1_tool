@@ -65,6 +65,11 @@ install -m 644 "${DIR}/fan-control.service" /etc/systemd/system/fan-control.serv
 install -d -m 755 /etc/zero1-tool
 if [[ ! -f /etc/zero1-tool/fan.conf ]]; then
   install -m 644 "${DIR}/fan-control.conf" /etc/zero1-tool/fan.conf
+elif ! grep -q '^LOG_RETENTION_DAYS=' /etc/zero1-tool/fan.conf; then
+  printf '\nLOG_RETENTION_DAYS=3\n' >> /etc/zero1-tool/fan.conf
+fi
+if [[ -f /etc/zero1-tool/fan.conf ]] && ! grep -q '^LOG_ENABLED=' /etc/zero1-tool/fan.conf; then
+  printf 'LOG_ENABLED=1\n' >> /etc/zero1-tool/fan.conf
 fi
 if [[ ! -f /etc/zero1-tool/sata-led.conf ]]; then
   install -m 644 "${DIR}/sata-led.conf" /etc/zero1-tool/sata-led.conf

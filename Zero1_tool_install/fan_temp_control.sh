@@ -22,6 +22,8 @@ TEMP_FULL=70
 TEMP_CRITICAL=90
 FAN_DUTY_MIN=60
 CHECK_INTERVAL=3
+LOG_RETENTION_DAYS=3
+LOG_ENABLED=1
 # Startup always uses full speed. These values are retained for config compatibility.
 STARTUP_SPEED=15
 STARTUP_HOLD=0
@@ -32,27 +34,69 @@ CONTROL_BACKEND="none"
 LAST_SPEED=""
 LAST_DUTY_PERCENT=0
 RELOAD_CONFIG=0
+LOG_DAY=""
 
-log() { printf '[%s] %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE"; }
+log() {
+    [ "$LOG_ENABLED" = 1 ] || return 0
+    rotate_log_if_needed
+    printf '[%s] %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE"
+}
 
-trim_log() {
+cleanup_log_archives() {
+    local archive
+    for archive in "${LOG_FILE}".20??-??-??; do
+        [ -f "$archive" ] || continue
+        # Keep archives up to the configured age; remove only files older than it.
+        find "$archive" -type f -mtime "+${LOG_RETENTION_DAYS}" -exec rm -f {} \; 2>/dev/null || true
+    done
+}
+
+split_log_by_day() {
+    local today="$1"
     [ -f "$LOG_FILE" ] || return 0
-    local cutoff
-    cutoff=$(date -d '1 day ago' '+%Y-%m-%d %H:%M' 2>/dev/null || true)
-    [ -n "$cutoff" ] || return 0
-    awk -v c="$cutoff" '/^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]/ { if (substr($0,2,16) >= c) print; next } { print }' "$LOG_FILE" > "${LOG_FILE}.tmp" 2>/dev/null && mv "${LOG_FILE}.tmp" "$LOG_FILE"
+    awk -v prefix="${LOG_FILE}." -v fallback="$today" '
+        {
+            day = fallback
+            if (substr($0, 1, 1) == "[" && substr($0, 6, 1) == "-" && substr($0, 9, 1) == "-") {
+                day = substr($0, 2, 10)
+            }
+            print $0 >> (prefix day)
+        }
+    ' "$LOG_FILE" 2>/dev/null && : > "$LOG_FILE"
+}
+
+rotate_log_if_needed() {
+    local today has_old
+    today="$(date +'%Y-%m-%d')"
+    if [ "$LOG_DAY" != "$today" ]; then
+        if [ -f "$LOG_FILE" ]; then
+            has_old=$(awk -v today="$today" '
+                BEGIN { found = 0 }
+                {
+                    if (substr($0, 1, 1) == "[" && substr($0, 6, 1) == "-" && substr($0, 9, 1) == "-" && substr($0, 2, 10) != today) {
+                        found = 1
+                        exit
+                    }
+                }
+                END { print found }
+            ' "$LOG_FILE" 2>/dev/null || printf '0')
+            [ "$has_old" = 1 ] && split_log_by_day "$today"
+        fi
+        LOG_DAY="$today"
+        cleanup_log_archives
+    fi
 }
 
 is_uint() { [[ "$1" =~ ^[0-9]+$ ]]; }
 
 load_config() {
     local key value
-    local m="$MODE" ms="$MANUAL_SPEED" off="$TEMP_OFF" low="$TEMP_LOW" full="$TEMP_FULL" critical="$TEMP_CRITICAL" min="$FAN_DUTY_MIN" interval="$CHECK_INTERVAL" startup="$STARTUP_SPEED" hold="$STARTUP_HOLD"
+    local m="$MODE" ms="$MANUAL_SPEED" off="$TEMP_OFF" low="$TEMP_LOW" full="$TEMP_FULL" critical="$TEMP_CRITICAL" min="$FAN_DUTY_MIN" interval="$CHECK_INTERVAL" retention="$LOG_RETENTION_DAYS" enabled="$LOG_ENABLED" startup="$STARTUP_SPEED" hold="$STARTUP_HOLD"
     if [ -r "$CONFIG_FILE" ]; then
         while IFS='=' read -r key value; do
             key="${key//[[:space:]]/}"; value="${value//[[:space:]]/}"
             case "$key" in
-                MODE) m="$value";; MANUAL_SPEED) ms="$value";; TEMP_OFF) off="$value";; TEMP_LOW) low="$value";; TEMP_FULL) full="$value";; TEMP_CRITICAL) critical="$value";; FAN_DUTY_MIN) min="$value";; CHECK_INTERVAL) interval="$value";; STARTUP_SPEED) startup="$value";; STARTUP_HOLD) hold="$value";;
+                MODE) m="$value";; MANUAL_SPEED) ms="$value";; TEMP_OFF) off="$value";; TEMP_LOW) low="$value";; TEMP_FULL) full="$value";; TEMP_CRITICAL) critical="$value";; FAN_DUTY_MIN) min="$value";; CHECK_INTERVAL) interval="$value";; LOG_RETENTION_DAYS) retention="$value";; LOG_ENABLED) enabled="$value";; STARTUP_SPEED) startup="$value";; STARTUP_HOLD) hold="$value";;
             esac
         done < "$CONFIG_FILE"
     fi
@@ -64,9 +108,11 @@ load_config() {
     is_uint "$critical" && (( critical >= full && critical <= 105 )) || critical=90
     is_uint "$min" && (( min >= 40 && min <= 100 )) || min=60
     is_uint "$interval" && (( interval >= 1 && interval <= 30 )) || interval=3
+    is_uint "$retention" && (( retention >= 1 && retention <= 30 )) || retention=3
+    [[ "$enabled" = 0 || "$enabled" = 1 ]] || enabled=1
     is_uint "$startup" && (( startup >= 1 && startup <= 15 )) || startup=6
     is_uint "$hold" && (( hold <= 30 )) || hold=5
-    MODE="$m"; MANUAL_SPEED="$ms"; TEMP_OFF="$off"; TEMP_LOW="$low"; TEMP_FULL="$full"; TEMP_CRITICAL="$critical"; FAN_DUTY_MIN="$min"; CHECK_INTERVAL="$interval"; STARTUP_SPEED="$startup"; STARTUP_HOLD="$hold"
+    MODE="$m"; MANUAL_SPEED="$ms"; TEMP_OFF="$off"; TEMP_LOW="$low"; TEMP_FULL="$full"; TEMP_CRITICAL="$critical"; FAN_DUTY_MIN="$min"; CHECK_INTERVAL="$interval"; LOG_RETENTION_DAYS="$retention"; LOG_ENABLED="$enabled"; STARTUP_SPEED="$startup"; STARTUP_HOLD="$hold"
 }
 
 find_pwm7_chip() {
@@ -137,7 +183,7 @@ auto_speed_for_temp() {
 write_status() {
     local temp="$1" speed="$2" tmp="${STATUS_FILE}.tmp.$$"
     mkdir -p "$STATUS_DIR"
-    printf '{"timestamp":"%s","temperature":%d,"mode":"%s","speed":%d,"duty_percent":%d,"backend":"%s","pwm_chip":"%s","temp_off":%d,"temp_low":%d,"temp_full":%d,"temp_critical":%d,"manual_speed":%d,"check_interval":%d}\n' "$(date -Iseconds)" "$temp" "$MODE" "$speed" "$LAST_DUTY_PERCENT" "$CONTROL_BACKEND" "$FOUND_CHIP" "$TEMP_OFF" "$TEMP_LOW" "$TEMP_FULL" "$TEMP_CRITICAL" "$MANUAL_SPEED" "$CHECK_INTERVAL" > "$tmp"
+    printf '{"timestamp":"%s","temperature":%d,"mode":"%s","speed":%d,"duty_percent":%d,"backend":"%s","pwm_chip":"%s","temp_off":%d,"temp_low":%d,"temp_full":%d,"temp_critical":%d,"manual_speed":%d,"check_interval":%d,"log_retention_days":%d,"log_enabled":%d}\n' "$(date -Iseconds)" "$temp" "$MODE" "$speed" "$LAST_DUTY_PERCENT" "$CONTROL_BACKEND" "$FOUND_CHIP" "$TEMP_OFF" "$TEMP_LOW" "$TEMP_FULL" "$TEMP_CRITICAL" "$MANUAL_SPEED" "$CHECK_INTERVAL" "$LOG_RETENTION_DAYS" "$LOG_ENABLED" > "$tmp"
     mv "$tmp" "$STATUS_FILE"
 }
 
@@ -154,13 +200,13 @@ handle_hup() { RELOAD_CONFIG=1; }
 shutdown_fan() { log 'Fan controller stopping; setting full speed for safety'; set_fan_speed 15 || true; exit 0; }
 
 main() {
-    touch "$LOG_FILE"; mkdir -p "$STATUS_DIR"; trim_log; load_config
+    mkdir -p "$STATUS_DIR"; load_config; if [ "$LOG_ENABLED" = 1 ]; then touch "$LOG_FILE"; rotate_log_if_needed; fi
     trap handle_hup HUP; trap shutdown_fan INT TERM
     if [ "$USE_GPIO_FORCE" = 1 ]; then init_gpio || { echo "GPIO${FAN_GPIO} unavailable"; exit 1; }; elif ! init_pwm; then init_gpio || { echo 'PWM and GPIO are unavailable'; exit 1; }; log 'PWM unavailable; started with GPIO fallback'; fi
     case "${1:-}" in
         auto)
             local n=0 temp; set_fan_speed 15; log "Fan controller started with ${CONTROL_BACKEND}; startup speed=15 (fail-safe)"
-            while true; do load_config; temp="$(get_cpu_temp)"; control_once "$temp"; n=$((n+1)); if (( n % 20 == 0 )) && [ "$CONTROL_BACKEND" = gpio ] && [ "$USE_GPIO_FORCE" != 1 ] && init_pwm; then log 'PWM became available; switched from GPIO to PWM'; LAST_SPEED=''; fi; (( n % 400 == 0 )) && trim_log; sleep "$CHECK_INTERVAL"; done;;
+            while true; do load_config; temp="$(get_cpu_temp)"; control_once "$temp"; n=$((n+1)); if (( n % 20 == 0 )) && [ "$CONTROL_BACKEND" = gpio ] && [ "$USE_GPIO_FORCE" != 1 ] && init_pwm; then log 'PWM became available; switched from GPIO to PWM'; LAST_SPEED=''; fi; if (( n % 20 == 0 )); then rotate_log_if_needed; cleanup_log_archives; fi; sleep "$CHECK_INTERVAL"; done;;
         manual) set_fan_speed "${2:-15}";; factory) factory_test_mode;; test) pwm_test_cycle;; off) set_fan_speed 0;; full) set_fan_speed 15;; *) echo "Usage: $0 {auto|manual 0-15|factory|test|off|full}"; exit 1;;
     esac
 }

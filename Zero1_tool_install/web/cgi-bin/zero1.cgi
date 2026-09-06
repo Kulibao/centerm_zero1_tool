@@ -81,8 +81,12 @@ case "$action" in
     ;;
   config)
     header
-    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","CHECK_INTERVAL":"%s","STANDBY_BLINK":"%s","BOOT_BEEP":"%s"}\n' \
-      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$(get_value CHECK_INTERVAL)" "$(get_sata_value STANDBY_BLINK)" "$(get_buzzer_value BOOT_BEEP)"
+    retention="$(get_value LOG_RETENTION_DAYS)"
+    in_range "$retention" 1 30 || retention=3
+    enabled="$(get_value LOG_ENABLED)"
+    [ "$enabled" = 0 ] || enabled=1
+    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","CHECK_INTERVAL":"%s","LOG_RETENTION_DAYS":"%s","LOG_ENABLED":"%s","STANDBY_BLINK":"%s","BOOT_BEEP":"%s"}\n' \
+      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$(get_value CHECK_INTERVAL)" "$retention" "$enabled" "$(get_sata_value STANDBY_BLINK)" "$(get_buzzer_value BOOT_BEEP)"
     ;;
   logs)
     header
@@ -187,11 +191,55 @@ case "$action" in
       error '蜂鸣器测试失败，请检查蜂鸣器节点或权限'
     fi
     ;;
+  save_log)
+    [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
+    length=${CONTENT_LENGTH:-0}; in_range "$length" 1 1024 || error '请求大小无效'
+    body=$(dd bs=1 count="$length" 2>/dev/null)
+    LOG_RETENTION_DAYS=''
+    LOG_ENABLED=''
+    oldifs=$IFS; IFS='&'
+    for item in $body; do
+      key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
+      case "$key" in
+        LOG_RETENTION_DAYS) LOG_RETENTION_DAYS="$value";;
+        LOG_ENABLED) LOG_ENABLED="$value";;
+      esac
+    done
+    IFS=$oldifs
+    in_range "$LOG_RETENTION_DAYS" 1 30 || error '日志保留天数必须是1到30天'
+    [ "$LOG_ENABLED" = 0 ] || [ "$LOG_ENABLED" = 1 ] || error '日志开关参数无效'
+    mkdir -p /etc/zero1-tool
+    log_tmp="${CONFIG}.tmp.$$"
+    if [ -r "$CONFIG" ]; then
+      awk -v value="$LOG_RETENTION_DAYS" -v enabled="$LOG_ENABLED" '
+        BEGIN { found = 0 }
+        /^LOG_RETENTION_DAYS=/ { if (!found) print "LOG_RETENTION_DAYS=" value; found = 1; next }
+        /^LOG_ENABLED=/ { if (!enabled_found) print "LOG_ENABLED=" enabled; enabled_found = 1; next }
+        { print }
+        END { if (!found) print "LOG_RETENTION_DAYS=" value; if (!enabled_found) print "LOG_ENABLED=" enabled }
+      ' "$CONFIG" > "$log_tmp"
+    else
+      printf '# Managed by T-NAS Zero1tool\nLOG_RETENTION_DAYS=%s\nLOG_ENABLED=%s\n' "$LOG_RETENTION_DAYS" "$LOG_ENABLED" > "$log_tmp"
+    fi
+    mv "$log_tmp" "$CONFIG"
+    systemctl kill -s HUP fan-control.service 2>/dev/null || systemctl restart fan-control.service 2>/dev/null || true
+    header; printf '{"ok":true}\n'
+    ;;
+  delete_logs)
+    [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
+    # Remove the active file and any archive/temp using the fixed fan-log prefix only.
+    rm -f -- "$LOG" "$LOG".* 2>/dev/null || true
+    header; printf '{"ok":true}\n'
+    ;;
   save)
     [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
     length=${CONTENT_LENGTH:-0}; in_range "$length" 1 8192 || error '请求大小无效'
     body=$(dd bs=1 count="$length" 2>/dev/null)
     MODE=''; MANUAL_SPEED=''; TEMP_OFF=''; TEMP_LOW=''; TEMP_FULL=''; TEMP_CRITICAL=''; FAN_DUTY_MIN=''; CHECK_INTERVAL=''; SATA_STANDBY_BLINK="$(get_sata_value STANDBY_BLINK)"
+    LOG_RETENTION_DAYS="$(get_value LOG_RETENTION_DAYS)"
+    in_range "$LOG_RETENTION_DAYS" 1 30 || LOG_RETENTION_DAYS=3
+    LOG_ENABLED="$(get_value LOG_ENABLED)"
+    [ "$LOG_ENABLED" = 0 ] || [ "$LOG_ENABLED" = 1 ] || LOG_ENABLED=1
     [ "$SATA_STANDBY_BLINK" = 0 ] || SATA_STANDBY_BLINK=1
     oldifs=$IFS; IFS='&'
     for item in $body; do
@@ -216,7 +264,7 @@ case "$action" in
     umask 022
     {
       echo '# Managed by T-NAS Zero1tool'
-      echo "MODE=$MODE"; echo "MANUAL_SPEED=$MANUAL_SPEED"; echo "TEMP_OFF=$TEMP_OFF"; echo "TEMP_LOW=$TEMP_LOW"; echo "TEMP_FULL=$TEMP_FULL"; echo "TEMP_CRITICAL=$TEMP_CRITICAL"; echo "FAN_DUTY_MIN=$FAN_DUTY_MIN"; echo "CHECK_INTERVAL=$CHECK_INTERVAL"
+      echo "MODE=$MODE"; echo "MANUAL_SPEED=$MANUAL_SPEED"; echo "TEMP_OFF=$TEMP_OFF"; echo "TEMP_LOW=$TEMP_LOW"; echo "TEMP_FULL=$TEMP_FULL"; echo "TEMP_CRITICAL=$TEMP_CRITICAL"; echo "FAN_DUTY_MIN=$FAN_DUTY_MIN"; echo "CHECK_INTERVAL=$CHECK_INTERVAL"; echo "LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS"; echo "LOG_ENABLED=$LOG_ENABLED"
       echo "STARTUP_SPEED=$(get_value STARTUP_SPEED)"; echo "STARTUP_HOLD=$(get_value STARTUP_HOLD)"
     } > "$tmp"
     mv "$tmp" "$CONFIG"
