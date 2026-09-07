@@ -15,6 +15,9 @@ NPU_FIX=/home/anna/Zero1_tool_install/fnos_npu_fix.sh
 NPU_FIX_PID=${KERNEL_FIX_DIR}/npu-fix.pid
 NPU_FIX_LOG=${KERNEL_FIX_DIR}/npu-fix.log
 NPU_FIX_RESULT=${KERNEL_FIX_DIR}/npu-fix.result
+SLOT1_PATH='/sys/devices/platform/fc400000.sata/ata*/host*/target*:*:*/*:*:*:*/block'
+SLOT2_PATH='/sys/devices/platform/fc800000.sata/ata*/host*/target*:*:*/*:*:*:*/block'
+DISK_TEMP_CACHE_SECONDS=30
 
 header() { printf 'Content-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nStatus: %s\r\n\r\n' "${1:-200 OK}"; }
 error() { header "400 Bad Request"; printf '{"error":"%s"}\n' "$1"; exit 0; }
@@ -26,6 +29,64 @@ get_buzzer_value() { sed -n "s/^$1=//p" "$BUZZER_CONFIG" 2>/dev/null | tail -n 1
 is_uint() { case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac; }
 in_range() { is_uint "$1" && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
 urldecode() { printf '%b' "$(printf '%s' "$1" | sed 's/+/ /g;s/%/\\x/g')"; }
+slot_dev() {
+  # The argument contains the board-specific sysfs glob and must expand here.
+  ls $1 2>/dev/null | head -n 1 || true
+}
+disk_status_json() {
+  slot="$1"; path="$2"; dev="$(slot_dev "$path")"
+  if [ -z "$dev" ] || [ ! -e "/sys/block/$dev/stat" ]; then
+    rm -f "/run/zero1-tool/disk${slot}-temp" 2>/dev/null || true
+    printf '{"device":"","state":"missing","temperature":null}'
+    return
+  fi
+
+  power='unknown'
+  if [ -x /sbin/hdparm ]; then
+    power_output=$(/sbin/hdparm -C "/dev/$dev" 2>&1 || true)
+    if printf '%s\n' "$power_output" | grep -Eiq 'standby|sleeping'; then
+      power='standby'
+    elif printf '%s\n' "$power_output" | grep -Eiq 'active/idle'; then
+      power='active'
+    fi
+  fi
+  if [ "$power" = standby ]; then
+    printf '{"device":"%s","state":"standby","temperature":null}' "$dev"
+    return
+  fi
+
+  cache="/run/zero1-tool/disk${slot}-temp"
+  now=$(date +%s)
+  if [ "$power" = active ] && [ -r "$cache" ]; then
+    cache_time=$(stat -c %Y "$cache" 2>/dev/null || printf '0')
+    cache_dev=$(sed -n '1p' "$cache" 2>/dev/null || true)
+    cache_temp=$(sed -n '2p' "$cache" 2>/dev/null || true)
+    if [ "$cache_dev" = "$dev" ] && in_range "$cache_temp" 1 125 && [ $((now - cache_time)) -lt "$DISK_TEMP_CACHE_SECONDS" ]; then
+      printf '{"device":"%s","state":"active","temperature":%s}' "$dev" "$cache_temp"
+      return
+    fi
+  fi
+
+  smart_output=$(smartctl -n standby -A "/dev/$dev" 2>&1 || true)
+  if printf '%s\n' "$smart_output" | grep -Eiq 'device is in standby|device is in sleep'; then
+    printf '{"device":"%s","state":"standby","temperature":null}' "$dev"
+    return
+  fi
+  temp=$(printf '%s\n' "$smart_output" | awk '
+    $1 == "194" && $10 ~ /^[0-9]+$/ { print $10; exit }
+    $1 == "190" && $10 ~ /^[0-9]+$/ { fallback = $10 }
+    /Current Drive Temperature:/ { for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }
+    END { if (fallback != "") print fallback }
+  ' | head -n 1)
+  if in_range "$temp" 1 125; then
+    mkdir -p /run/zero1-tool
+    cache_tmp="${cache}.tmp.$$"
+    printf '%s\n%s\n' "$dev" "$temp" > "$cache_tmp" && mv "$cache_tmp" "$cache"
+    printf '{"device":"%s","state":"active","temperature":%s}' "$dev" "$temp"
+  else
+    printf '{"device":"%s","state":"unavailable","temperature":null}' "$dev"
+  fi
+}
 kernel_fix_running() {
   [ -s "$KERNEL_FIX_PID" ] || return 1
   pid=$(cat "$KERNEL_FIX_PID" 2>/dev/null || true)
@@ -76,7 +137,9 @@ case "$action" in
     fi
     service=inactive
     systemctl is-active --quiet fan-control.service 2>/dev/null && service=active
-    printf '%s' "$body" | sed 's/}[[:space:]]*$//' | awk -v s="$service" '{ printf "%s,\"service\":\"%s\"}\n", $0, s }'
+    disk1=$(disk_status_json 1 "$SLOT1_PATH")
+    disk2=$(disk_status_json 2 "$SLOT2_PATH")
+    printf '%s' "$body" | sed 's/}[[:space:]]*$//' | awk -v s="$service" -v d1="$disk1" -v d2="$disk2" '{ printf "%s,\"service\":\"%s\",\"disk1\":%s,\"disk2\":%s}\n", $0, s, d1, d2 }'
     printf '\n'
     ;;
   config)
