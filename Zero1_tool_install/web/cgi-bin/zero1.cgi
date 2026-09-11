@@ -4,6 +4,7 @@ set -eu
 CONFIG=/etc/zero1-tool/fan.conf
 SATA_CONFIG=/etc/zero1-tool/sata-led.conf
 BUZZER_CONFIG=/etc/zero1-tool/buzzer.conf
+EMMC_HEALTH=/etc/zero1-tool/emmc-health.json
 STATUS=/run/zero1-tool/fan-status.json
 LOG=/var/log/fan_control.log
 KERNEL_FIX=/home/anna/Zero1_tool_install/fnos_kernel_fix.sh
@@ -87,6 +88,132 @@ disk_status_json() {
     printf '{"device":"%s","state":"unavailable","temperature":null}' "$dev"
   fi
 }
+
+json_quote() { printf '"%s"' "$(printf '%s' "$1" | json_escape)"; }
+json_num() { case "$1" in ''|*[!0-9]*) printf 'null';; *) printf '%s' "$1";; esac; }
+
+life_time_label() {
+  case "$1" in
+    0x01) printf '0%% - 10%%';; 0x02) printf '10%% - 20%%';; 0x03) printf '20%% - 30%%';;
+    0x04) printf '30%% - 40%%';; 0x05) printf '40%% - 50%%';; 0x06) printf '50%% - 60%%';;
+    0x07) printf '60%% - 70%%';; 0x08) printf '70%% - 80%%';; 0x09) printf '80%% - 90%%';;
+    0x0A|0x0a) printf '90%% - 100%%';; 0x0B|0x0b) printf '超过寿命范围';; *) printf '未提供';;
+  esac
+}
+
+pre_eol_label() {
+  case "$1" in
+    0x01) printf '正常';; 0x02) printf '警告：接近寿命终点';;
+    0x03) printf '严重：已达到寿命终点';; *) printf '未提供';;
+  esac
+}
+
+find_emmc_block() {
+  for p in /sys/block/mmcblk*; do
+    [ -d "$p" ] || continue
+    type=$(cat "$p/device/type" 2>/dev/null || true)
+    removable=$(cat "$p/removable" 2>/dev/null || true)
+    if [ "$type" = MMC ] || { [ "$removable" = 0 ] && [ -e "$p/device" ]; }; then
+      basename "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+emmc_attr() { [ -r "$1" ] && cat "$1" 2>/dev/null || true; }
+emmc_ios_attr() {
+  [ -r "$1" ] || return 0
+  awk -F: -v key="$2" '$1 == key { sub(/^[[:space:]]*/, "", $2); print $2; exit }' "$1" 2>/dev/null || true
+}
+
+emmc_health_read_json() {
+  emmc_read_at=$(date '+%Y-%m-%d %H:%M:%S')
+  emmc_block=$(find_emmc_block || true)
+  if [ -z "$emmc_block" ]; then
+    printf '{"available":false,"read_at":%s,"message":"未检测到 eMMC 设备"}\n' "$(json_quote "$emmc_read_at")"
+    return 0
+  fi
+
+  emmc_device="/sys/block/${emmc_block}/device"
+  emmc_card=$(readlink -f "$emmc_device" 2>/dev/null || true)
+  [ -n "$emmc_card" ] || emmc_card="$emmc_device"
+  emmc_card_name=$(basename "$emmc_card")
+  emmc_host_name=$(basename "$(dirname "$emmc_card")")
+  emmc_ext_csd="/sys/kernel/debug/${emmc_host_name}/${emmc_card_name}/ext_csd"
+  [ -r "$emmc_ext_csd" ] || emmc_ext_csd=''
+  emmc_ios="/sys/kernel/debug/${emmc_host_name}/ios"
+  [ -r "$emmc_ios" ] || emmc_ios=''
+
+  emmc_name=$(emmc_attr "$emmc_card/name")
+  emmc_serial=$(emmc_attr "$emmc_card/serial")
+  emmc_date=$(emmc_attr "$emmc_card/date")
+  emmc_manfid=$(emmc_attr "$emmc_card/manfid")
+  emmc_oemid=$(emmc_attr "$emmc_card/oemid")
+  emmc_fwrev=$(emmc_attr "$emmc_card/fwrev")
+  emmc_hwrev=$(emmc_attr "$emmc_card/hwrev")
+  emmc_revision=$(emmc_attr "$emmc_card/rev")
+  emmc_product_revision=$(emmc_attr "$emmc_card/prv")
+  emmc_type=$(emmc_attr "$emmc_card/type")
+  emmc_cid=$(emmc_attr "$emmc_card/cid")
+  emmc_csd=$(emmc_attr "$emmc_card/csd")
+  emmc_ocr=$(emmc_attr "$emmc_card/ocr")
+  emmc_rca=$(emmc_attr "$emmc_card/rca")
+  emmc_dsr=$(emmc_attr "$emmc_card/dsr")
+  emmc_life=$(emmc_attr "$emmc_card/life_time")
+  emmc_life_a=$(printf '%s\n' "$emmc_life" | awk '{print $1}')
+  emmc_life_b=$(printf '%s\n' "$emmc_life" | awk '{print $2}')
+  emmc_pre_eol=$(emmc_attr "$emmc_card/pre_eol_info")
+  emmc_preferred_erase=$(emmc_attr "$emmc_card/preferred_erase_size")
+  emmc_erase_size=$(emmc_attr "$emmc_card/erase_size")
+  emmc_wp_group_size=$(emmc_attr "$emmc_card/wp_grp_size")
+  emmc_reliable_sectors=$(emmc_attr "$emmc_card/rel_sectors")
+  emmc_enhanced_area_offset=$(emmc_attr "$emmc_card/enhanced_area_offset")
+  emmc_enhanced_area_size=$(emmc_attr "$emmc_card/enhanced_area_size")
+  emmc_raw_rpmb_size_mult=$(emmc_attr "$emmc_card/raw_rpmb_size_mult")
+  emmc_enhanced_rpmb_supported=$(emmc_attr "$emmc_card/enhanced_rpmb_supported")
+  emmc_ffu_capable=$(emmc_attr "$emmc_card/ffu_capable")
+  emmc_cmdq_enabled=$(emmc_attr "$emmc_card/cmdq_en")
+  emmc_size_sectors=$(emmc_attr "/sys/block/${emmc_block}/size")
+  emmc_size_bytes=$(case "$emmc_size_sectors" in ''|*[!0-9]*) printf ''; ;; *) printf '%s' $((emmc_size_sectors * 512));; esac)
+  emmc_size_human=$(lsblk -dnro SIZE "/dev/${emmc_block}" 2>/dev/null || true)
+  emmc_logical=$(emmc_attr "/sys/block/${emmc_block}/queue/logical_block_size")
+  emmc_physical=$(emmc_attr "/sys/block/${emmc_block}/queue/physical_block_size")
+  emmc_ro=$(emmc_attr "/sys/block/${emmc_block}/ro")
+  emmc_removable=$(emmc_attr "/sys/block/${emmc_block}/removable")
+  emmc_ios_clock=$(emmc_ios_attr "$emmc_ios" clock)
+  emmc_ios_actual_clock=$(emmc_ios_attr "$emmc_ios" 'actual clock')
+  emmc_ios_vdd=$(emmc_ios_attr "$emmc_ios" vdd)
+  emmc_ios_bus_mode=$(emmc_ios_attr "$emmc_ios" 'bus mode')
+  emmc_ios_chip_select=$(emmc_ios_attr "$emmc_ios" 'chip select')
+  emmc_ios_mode=$(emmc_ios_attr "$emmc_ios" 'timing spec')
+  emmc_ios_voltage=$(emmc_ios_attr "$emmc_ios" 'signal voltage')
+  emmc_ios_width=$(emmc_ios_attr "$emmc_ios" 'bus width')
+  emmc_ios_power=$(emmc_ios_attr "$emmc_ios" 'power mode')
+  emmc_ios_driver=$(emmc_ios_attr "$emmc_ios" 'driver type')
+  emmc_partitions=$(lsblk -nrpo NAME,SIZE,FSTYPE,MOUNTPOINTS "/dev/${emmc_block}" 2>/dev/null | tr '\t' ' ' || true)
+  emmc_stat=$(cat "/sys/block/${emmc_block}/stat" 2>/dev/null || true)
+  emmc_reads=$(printf '%s\n' "$emmc_stat" | awk '{print $1}')
+  emmc_sectors_read=$(printf '%s\n' "$emmc_stat" | awk '{print $3}')
+  emmc_writes=$(printf '%s\n' "$emmc_stat" | awk '{print $5}')
+  emmc_sectors_written=$(printf '%s\n' "$emmc_stat" | awk '{print $7}')
+  emmc_ext_raw=''
+  [ -r "$emmc_ext_csd" ] && emmc_ext_raw=$(head -c 4096 "$emmc_ext_csd" 2>/dev/null || true)
+  emmc_temperature=''
+  emmc_temp_file=$(find "$emmc_card" -maxdepth 1 -type f -iname '*temp*' -print -quit 2>/dev/null || true)
+  [ -n "$emmc_temp_file" ] && emmc_temperature=$(emmc_attr "$emmc_temp_file")
+
+  printf '{"available":true,"read_at":%s,"device":%s,"card_path":%s,"model":%s,"serial":%s,"manufacture_date":%s,"manufacturer_id":%s,"oem_id":%s,"firmware_revision":%s,"hardware_revision":%s,"revision":%s,"product_revision":%s,"type":%s,"cid":%s,"csd":%s,"ocr":%s,"rca":%s,"dsr":%s,"life_time_raw":%s,"life_time_a_raw":%s,"life_time_b_raw":%s,"life_time_a":%s,"life_time_b":%s,"pre_eol_raw":%s,"pre_eol":%s,"preferred_erase_size":%s,"erase_size":%s,"write_protect_group_size":%s,"reliable_sectors":%s,"enhanced_area_offset":%s,"enhanced_area_size":%s,"raw_rpmb_size_multiplier":%s,"enhanced_rpmb_supported":%s,"ffu_capable":%s,"cmdq_enabled":%s,"size_human":%s,"size_sectors":%s,"size_bytes":%s,"logical_block_size":%s,"physical_block_size":%s,"read_only":%s,"removable":%s,"bus_clock":%s,"actual_bus_clock":%s,"bus_vdd":%s,"bus_mode":%s,"chip_select":%s,"bus_timing":%s,"signal_voltage":%s,"bus_width":%s,"power_mode":%s,"driver_type":%s,"temperature":%s,"partitions":%s,"reads_completed_since_boot":%s,"sectors_read_since_boot":%s,"writes_completed_since_boot":%s,"sectors_written_since_boot":%s,"stat_raw":%s,"ext_csd_raw":%s,"message":"读取结果已保存到 /etc/zero1-tool/emmc-health.json"}\n' \
+    "$(json_quote "$emmc_read_at")" "$(json_quote "/dev/${emmc_block}")" "$(json_quote "$emmc_card")" "$(json_quote "$emmc_name")" "$(json_quote "$emmc_serial")" "$(json_quote "$emmc_date")" "$(json_quote "$emmc_manfid")" "$(json_quote "$emmc_oemid")" "$(json_quote "$emmc_fwrev")" "$(json_quote "$emmc_hwrev")" "$(json_quote "$emmc_revision")" "$(json_quote "$emmc_product_revision")" "$(json_quote "$emmc_type")" "$(json_quote "$emmc_cid")" "$(json_quote "$emmc_csd")" "$(json_quote "$emmc_ocr")" "$(json_quote "$emmc_rca")" "$(json_quote "$emmc_dsr")" "$(json_quote "$emmc_life")" "$(json_quote "$emmc_life_a")" "$(json_quote "$emmc_life_b")" "$(json_quote "$(life_time_label "$emmc_life_a")")" "$(json_quote "$(life_time_label "$emmc_life_b")")" "$(json_quote "$emmc_pre_eol")" "$(json_quote "$(pre_eol_label "$emmc_pre_eol")")" "$(json_quote "$emmc_preferred_erase")" "$(json_quote "$emmc_erase_size")" "$(json_quote "$emmc_wp_group_size")" "$(json_quote "$emmc_reliable_sectors")" "$(json_quote "$emmc_enhanced_area_offset")" "$(json_quote "$emmc_enhanced_area_size")" "$(json_quote "$emmc_raw_rpmb_size_mult")" "$(json_quote "$emmc_enhanced_rpmb_supported")" "$(json_quote "$emmc_ffu_capable")" "$(json_quote "$emmc_cmdq_enabled")" "$(json_quote "$emmc_size_human")" "$(json_num "$emmc_size_sectors")" "$(json_num "$emmc_size_bytes")" "$(json_num "$emmc_logical")" "$(json_num "$emmc_physical")" "$(json_num "$emmc_ro")" "$(json_num "$emmc_removable")" "$(json_quote "$emmc_ios_clock")" "$(json_quote "$emmc_ios_actual_clock")" "$(json_quote "$emmc_ios_vdd")" "$(json_quote "$emmc_ios_bus_mode")" "$(json_quote "$emmc_ios_chip_select")" "$(json_quote "$emmc_ios_mode")" "$(json_quote "$emmc_ios_voltage")" "$(json_quote "$emmc_ios_width")" "$(json_quote "$emmc_ios_power")" "$(json_quote "$emmc_ios_driver")" "$(json_quote "$emmc_temperature")" "$(json_quote "$emmc_partitions")" "$(json_num "$emmc_reads")" "$(json_num "$emmc_sectors_read")" "$(json_num "$emmc_writes")" "$(json_num "$emmc_sectors_written")" "$(json_quote "$emmc_stat")" "$(json_quote "$emmc_ext_raw")"
+}
+
+emmc_health_json() {
+  if [ -r "$EMMC_HEALTH" ]; then
+    cat "$EMMC_HEALTH"
+  else
+    printf '{"available":false,"read_at":null,"message":"尚未读取 eMMC 信息，请点击读取按钮"}\n'
+  fi
+}
 kernel_fix_running() {
   [ -s "$KERNEL_FIX_PID" ] || return 1
   pid=$(cat "$KERNEL_FIX_PID" 2>/dev/null || true)
@@ -148,8 +275,27 @@ case "$action" in
     in_range "$retention" 1 30 || retention=3
     enabled="$(get_value LOG_ENABLED)"
     [ "$enabled" = 0 ] || enabled=1
-    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","CHECK_INTERVAL":"%s","LOG_RETENTION_DAYS":"%s","LOG_ENABLED":"%s","STANDBY_BLINK":"%s","BOOT_BEEP":"%s"}\n' \
-      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$(get_value CHECK_INTERVAL)" "$retention" "$enabled" "$(get_sata_value STANDBY_BLINK)" "$(get_buzzer_value BOOT_BEEP)"
+    always_on="$(get_value ALWAYS_ON)"
+    [ "$always_on" = 1 ] || always_on=0
+    idle_duty="$(get_value IDLE_DUTY_PERCENT)"
+    in_range "$idle_duty" 10 40 || idle_duty=20
+    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","ALWAYS_ON":"%s","IDLE_DUTY_PERCENT":"%s","CHECK_INTERVAL":"%s","LOG_RETENTION_DAYS":"%s","LOG_ENABLED":"%s","STANDBY_BLINK":"%s","BOOT_BEEP":"%s"}\n' \
+      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$always_on" "$idle_duty" "$(get_value CHECK_INTERVAL)" "$retention" "$enabled" "$(get_sata_value STANDBY_BLINK)" "$(get_buzzer_value BOOT_BEEP)"
+    ;;
+  emmc_health)
+    header
+    emmc_health_json
+    ;;
+  emmc_health_read)
+    [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
+    mkdir -p /etc/zero1-tool
+    emmc_tmp="${EMMC_HEALTH}.tmp.$$"
+    emmc_body=$(emmc_health_read_json)
+    printf '%s\n' "$emmc_body" > "$emmc_tmp" || error '无法保存 eMMC 读取结果'
+    chmod 0644 "$emmc_tmp" 2>/dev/null || true
+    mv -f "$emmc_tmp" "$EMMC_HEALTH" || error '无法保存 eMMC 读取结果'
+    header
+    printf '%s\n' "$emmc_body"
     ;;
   logs)
     header
@@ -299,6 +445,10 @@ case "$action" in
     length=${CONTENT_LENGTH:-0}; in_range "$length" 1 8192 || error '请求大小无效'
     body=$(dd bs=1 count="$length" 2>/dev/null)
     MODE=''; MANUAL_SPEED=''; TEMP_OFF=''; TEMP_LOW=''; TEMP_FULL=''; TEMP_CRITICAL=''; FAN_DUTY_MIN=''; CHECK_INTERVAL=''; SATA_STANDBY_BLINK="$(get_sata_value STANDBY_BLINK)"
+    ALWAYS_ON="$(get_value ALWAYS_ON)"
+    [ "$ALWAYS_ON" = 1 ] || ALWAYS_ON=0
+    IDLE_DUTY_PERCENT="$(get_value IDLE_DUTY_PERCENT)"
+    in_range "$IDLE_DUTY_PERCENT" 10 40 || IDLE_DUTY_PERCENT=20
     LOG_RETENTION_DAYS="$(get_value LOG_RETENTION_DAYS)"
     in_range "$LOG_RETENTION_DAYS" 1 30 || LOG_RETENTION_DAYS=3
     LOG_ENABLED="$(get_value LOG_ENABLED)"
@@ -308,7 +458,7 @@ case "$action" in
     for item in $body; do
       key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
       case "$key" in
-        MODE) MODE="$value";; MANUAL_SPEED) MANUAL_SPEED="$value";; TEMP_OFF) TEMP_OFF="$value";; TEMP_LOW) TEMP_LOW="$value";; TEMP_FULL) TEMP_FULL="$value";; TEMP_CRITICAL) TEMP_CRITICAL="$value";; FAN_DUTY_MIN) FAN_DUTY_MIN="$value";; CHECK_INTERVAL) CHECK_INTERVAL="$value";; SATA_STANDBY_BLINK) SATA_STANDBY_BLINK="$value";;
+        MODE) MODE="$value";; MANUAL_SPEED) MANUAL_SPEED="$value";; TEMP_OFF) TEMP_OFF="$value";; TEMP_LOW) TEMP_LOW="$value";; TEMP_FULL) TEMP_FULL="$value";; TEMP_CRITICAL) TEMP_CRITICAL="$value";; FAN_DUTY_MIN) FAN_DUTY_MIN="$value";; ALWAYS_ON) ALWAYS_ON="$value";; IDLE_DUTY_PERCENT) IDLE_DUTY_PERCENT="$value";; CHECK_INTERVAL) CHECK_INTERVAL="$value";; SATA_STANDBY_BLINK) SATA_STANDBY_BLINK="$value";;
       esac
     done
     IFS=$oldifs
@@ -319,6 +469,8 @@ case "$action" in
     in_range "$TEMP_FULL" 32 90 || error '全速温度必须是32到90'
     in_range "$TEMP_CRITICAL" 33 105 || error '过热温度必须是33到105'
     in_range "$FAN_DUTY_MIN" 40 100 || error '最低占空比必须是40到100'
+    [ "$ALWAYS_ON" = 0 ] || [ "$ALWAYS_ON" = 1 ] || error '风扇始终运行开关无效'
+    in_range "$IDLE_DUTY_PERCENT" 10 40 || error '低温运行功率必须是10到40'
     in_range "$CHECK_INTERVAL" 1 30 || error '检测间隔必须是1到30秒'
     [ "$SATA_STANDBY_BLINK" = 0 ] || [ "$SATA_STANDBY_BLINK" = 1 ] || error '休眠闪烁开关无效'
     [ "$TEMP_OFF" -lt "$TEMP_LOW" ] && [ "$TEMP_LOW" -lt "$TEMP_FULL" ] && [ "$TEMP_FULL" -le "$TEMP_CRITICAL" ] || error '温度阈值必须依次升高'
@@ -327,7 +479,7 @@ case "$action" in
     umask 022
     {
       echo '# Managed by T-NAS Zero1tool'
-      echo "MODE=$MODE"; echo "MANUAL_SPEED=$MANUAL_SPEED"; echo "TEMP_OFF=$TEMP_OFF"; echo "TEMP_LOW=$TEMP_LOW"; echo "TEMP_FULL=$TEMP_FULL"; echo "TEMP_CRITICAL=$TEMP_CRITICAL"; echo "FAN_DUTY_MIN=$FAN_DUTY_MIN"; echo "CHECK_INTERVAL=$CHECK_INTERVAL"; echo "LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS"; echo "LOG_ENABLED=$LOG_ENABLED"
+      echo "MODE=$MODE"; echo "MANUAL_SPEED=$MANUAL_SPEED"; echo "TEMP_OFF=$TEMP_OFF"; echo "TEMP_LOW=$TEMP_LOW"; echo "TEMP_FULL=$TEMP_FULL"; echo "TEMP_CRITICAL=$TEMP_CRITICAL"; echo "FAN_DUTY_MIN=$FAN_DUTY_MIN"; echo "ALWAYS_ON=$ALWAYS_ON"; echo "IDLE_DUTY_PERCENT=$IDLE_DUTY_PERCENT"; echo "CHECK_INTERVAL=$CHECK_INTERVAL"; echo "LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS"; echo "LOG_ENABLED=$LOG_ENABLED"
       echo "STARTUP_SPEED=$(get_value STARTUP_SPEED)"; echo "STARTUP_HOLD=$(get_value STARTUP_HOLD)"
     } > "$tmp"
     mv "$tmp" "$CONFIG"

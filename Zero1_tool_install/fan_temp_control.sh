@@ -21,6 +21,8 @@ TEMP_LOW=55
 TEMP_FULL=70
 TEMP_CRITICAL=90
 FAN_DUTY_MIN=60
+ALWAYS_ON=0
+IDLE_DUTY_PERCENT=20
 CHECK_INTERVAL=3
 LOG_RETENTION_DAYS=3
 LOG_ENABLED=1
@@ -91,12 +93,12 @@ is_uint() { [[ "$1" =~ ^[0-9]+$ ]]; }
 
 load_config() {
     local key value
-    local m="$MODE" ms="$MANUAL_SPEED" off="$TEMP_OFF" low="$TEMP_LOW" full="$TEMP_FULL" critical="$TEMP_CRITICAL" min="$FAN_DUTY_MIN" interval="$CHECK_INTERVAL" retention="$LOG_RETENTION_DAYS" enabled="$LOG_ENABLED" startup="$STARTUP_SPEED" hold="$STARTUP_HOLD"
+    local m="$MODE" ms="$MANUAL_SPEED" off="$TEMP_OFF" low="$TEMP_LOW" full="$TEMP_FULL" critical="$TEMP_CRITICAL" min="$FAN_DUTY_MIN" always="$ALWAYS_ON" idle="$IDLE_DUTY_PERCENT" interval="$CHECK_INTERVAL" retention="$LOG_RETENTION_DAYS" enabled="$LOG_ENABLED" startup="$STARTUP_SPEED" hold="$STARTUP_HOLD"
     if [ -r "$CONFIG_FILE" ]; then
         while IFS='=' read -r key value; do
             key="${key//[[:space:]]/}"; value="${value//[[:space:]]/}"
             case "$key" in
-                MODE) m="$value";; MANUAL_SPEED) ms="$value";; TEMP_OFF) off="$value";; TEMP_LOW) low="$value";; TEMP_FULL) full="$value";; TEMP_CRITICAL) critical="$value";; FAN_DUTY_MIN) min="$value";; CHECK_INTERVAL) interval="$value";; LOG_RETENTION_DAYS) retention="$value";; LOG_ENABLED) enabled="$value";; STARTUP_SPEED) startup="$value";; STARTUP_HOLD) hold="$value";;
+                MODE) m="$value";; MANUAL_SPEED) ms="$value";; TEMP_OFF) off="$value";; TEMP_LOW) low="$value";; TEMP_FULL) full="$value";; TEMP_CRITICAL) critical="$value";; FAN_DUTY_MIN) min="$value";; ALWAYS_ON) always="$value";; IDLE_DUTY_PERCENT) idle="$value";; CHECK_INTERVAL) interval="$value";; LOG_RETENTION_DAYS) retention="$value";; LOG_ENABLED) enabled="$value";; STARTUP_SPEED) startup="$value";; STARTUP_HOLD) hold="$value";;
             esac
         done < "$CONFIG_FILE"
     fi
@@ -107,12 +109,14 @@ load_config() {
     is_uint "$full" && (( full > low && full <= 90 )) || full=70
     is_uint "$critical" && (( critical >= full && critical <= 105 )) || critical=90
     is_uint "$min" && (( min >= 40 && min <= 100 )) || min=60
+    [[ "$always" = 0 || "$always" = 1 ]] || always=0
+    is_uint "$idle" && (( idle >= 10 && idle <= 40 )) || idle=20
     is_uint "$interval" && (( interval >= 1 && interval <= 30 )) || interval=3
     is_uint "$retention" && (( retention >= 1 && retention <= 30 )) || retention=3
     [[ "$enabled" = 0 || "$enabled" = 1 ]] || enabled=1
     is_uint "$startup" && (( startup >= 1 && startup <= 15 )) || startup=6
     is_uint "$hold" && (( hold <= 30 )) || hold=5
-    MODE="$m"; MANUAL_SPEED="$ms"; TEMP_OFF="$off"; TEMP_LOW="$low"; TEMP_FULL="$full"; TEMP_CRITICAL="$critical"; FAN_DUTY_MIN="$min"; CHECK_INTERVAL="$interval"; LOG_RETENTION_DAYS="$retention"; LOG_ENABLED="$enabled"; STARTUP_SPEED="$startup"; STARTUP_HOLD="$hold"
+    MODE="$m"; MANUAL_SPEED="$ms"; TEMP_OFF="$off"; TEMP_LOW="$low"; TEMP_FULL="$full"; TEMP_CRITICAL="$critical"; FAN_DUTY_MIN="$min"; ALWAYS_ON="$always"; IDLE_DUTY_PERCENT="$idle"; CHECK_INTERVAL="$interval"; LOG_RETENTION_DAYS="$retention"; LOG_ENABLED="$enabled"; STARTUP_SPEED="$startup"; STARTUP_HOLD="$hold"
 }
 
 find_pwm7_chip() {
@@ -145,16 +149,23 @@ init_gpio() {
     CONTROL_BACKEND=gpio
 }
 
-set_fan_speed_pwm() {
-    local speed="$1" duty=0 duty_pct=0
-    if (( speed > 0 )); then
-        duty_pct=$(( FAN_DUTY_MIN + (speed - 1) * (100 - FAN_DUTY_MIN) / 14 )); (( duty_pct > 100 )) && duty_pct=100
-        if [ "$PWM_POLARITY" = inverted ]; then duty=$(( PWM_PERIOD * (100-duty_pct) / 100 )); else duty=$(( PWM_PERIOD * duty_pct / 100 )); fi
-    elif [ "$PWM_POLARITY" = inverted ]; then duty="$PWM_PERIOD"; fi
+set_fan_duty_percent_pwm() {
+    local duty_pct="$1" duty=0
+    (( duty_pct < 0 )) && duty_pct=0
+    (( duty_pct > 100 )) && duty_pct=100
+    if [ "$PWM_POLARITY" = inverted ]; then duty=$(( PWM_PERIOD * (100-duty_pct) / 100 )); else duty=$(( PWM_PERIOD * duty_pct / 100 )); fi
     printf '0\n' > "${PWM_PATH}/enable" 2>/dev/null || true
     printf '%s\n' "$duty" > "${PWM_PATH}/duty_cycle" 2>/dev/null || return 1
-    (( speed > 0 )) && printf '1\n' > "${PWM_PATH}/enable" 2>/dev/null || true
+    (( duty_pct > 0 )) && printf '1\n' > "${PWM_PATH}/enable" 2>/dev/null || true
     LAST_DUTY_PERCENT="$duty_pct"
+}
+
+set_fan_speed_pwm() {
+    local speed="$1" duty_pct=0
+    if (( speed > 0 )); then
+        duty_pct=$(( FAN_DUTY_MIN + (speed - 1) * (100 - FAN_DUTY_MIN) / 14 )); (( duty_pct > 100 )) && duty_pct=100
+    fi
+    set_fan_duty_percent_pwm "$duty_pct"
 }
 
 set_fan_speed_gpio() { local speed="$1" value=0; (( speed > 0 )) && value=1; printf '%s\n' "$value" > "/sys/class/gpio/gpio${FAN_GPIO}/value" 2>/dev/null || return 1; (( speed > 0 )) && LAST_DUTY_PERCENT=100 || LAST_DUTY_PERCENT=0; }
@@ -163,6 +174,20 @@ set_fan_speed() {
     local speed="$1"; speed=$(( speed < 0 ? 0 : speed > 15 ? 15 : speed ))
     if [ "$CONTROL_BACKEND" = pwm ] && [ -d "$PWM_PATH" ]; then set_fan_speed_pwm "$speed"; else set_fan_speed_gpio "$speed"; fi
     if [ "$LAST_SPEED" != "$speed" ]; then log "Fan speed=${speed}, duty=${LAST_DUTY_PERCENT}%, mode=${MODE}"; LAST_SPEED="$speed"; fi
+}
+
+set_fan_idle_duty() {
+    local token="idle:${IDLE_DUTY_PERCENT}" previous_duty="$LAST_DUTY_PERCENT"
+    if [ "$CONTROL_BACKEND" = pwm ] && [ -d "$PWM_PATH" ]; then
+        if (( previous_duty == 0 && IDLE_DUTY_PERCENT < FAN_DUTY_MIN )); then
+            set_fan_duty_percent_pwm "$FAN_DUTY_MIN"
+            sleep 0.5
+        fi
+        set_fan_duty_percent_pwm "$IDLE_DUTY_PERCENT"
+    else
+        set_fan_speed_gpio 1
+    fi
+    if [ "$LAST_SPEED" != "$token" ]; then log "Fan always-on idle duty=${LAST_DUTY_PERCENT}%, mode=${MODE}"; LAST_SPEED="$token"; fi
 }
 
 get_cpu_temp() {
@@ -183,13 +208,18 @@ auto_speed_for_temp() {
 write_status() {
     local temp="$1" speed="$2" tmp="${STATUS_FILE}.tmp.$$"
     mkdir -p "$STATUS_DIR"
-    printf '{"timestamp":"%s","temperature":%d,"mode":"%s","speed":%d,"duty_percent":%d,"backend":"%s","pwm_chip":"%s","temp_off":%d,"temp_low":%d,"temp_full":%d,"temp_critical":%d,"manual_speed":%d,"check_interval":%d,"log_retention_days":%d,"log_enabled":%d}\n' "$(date -Iseconds)" "$temp" "$MODE" "$speed" "$LAST_DUTY_PERCENT" "$CONTROL_BACKEND" "$FOUND_CHIP" "$TEMP_OFF" "$TEMP_LOW" "$TEMP_FULL" "$TEMP_CRITICAL" "$MANUAL_SPEED" "$CHECK_INTERVAL" "$LOG_RETENTION_DAYS" "$LOG_ENABLED" > "$tmp"
+    printf '{"timestamp":"%s","temperature":%d,"mode":"%s","speed":%d,"duty_percent":%d,"backend":"%s","pwm_chip":"%s","temp_off":%d,"temp_low":%d,"temp_full":%d,"temp_critical":%d,"manual_speed":%d,"always_on":%d,"idle_duty_percent":%d,"check_interval":%d,"log_retention_days":%d,"log_enabled":%d}\n' "$(date -Iseconds)" "$temp" "$MODE" "$speed" "$LAST_DUTY_PERCENT" "$CONTROL_BACKEND" "$FOUND_CHIP" "$TEMP_OFF" "$TEMP_LOW" "$TEMP_FULL" "$TEMP_CRITICAL" "$MANUAL_SPEED" "$ALWAYS_ON" "$IDLE_DUTY_PERCENT" "$CHECK_INTERVAL" "$LOG_RETENTION_DAYS" "$LOG_ENABLED" > "$tmp"
     mv "$tmp" "$STATUS_FILE"
 }
 
 control_once() {
     local temp="$1" speed
     if (( temp >= TEMP_CRITICAL )); then speed=15; log "WARNING: CPU temperature ${temp}C reached critical limit; forcing full speed"
+    elif [ "$MODE" = auto ] && (( ALWAYS_ON == 1 && temp < TEMP_OFF )); then
+        speed=0
+        set_fan_idle_duty
+        write_status "$temp" "$speed"
+        return
     else case "$MODE" in auto) speed="$(auto_speed_for_temp "$temp")";; manual) speed="$MANUAL_SPEED";; full) speed=15;; off) speed=0;; esac; fi
     set_fan_speed "$speed"; write_status "$temp" "$speed"
 }

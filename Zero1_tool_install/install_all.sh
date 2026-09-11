@@ -71,6 +71,12 @@ fi
 if [[ -f /etc/zero1-tool/fan.conf ]] && ! grep -q '^LOG_ENABLED=' /etc/zero1-tool/fan.conf; then
   printf 'LOG_ENABLED=1\n' >> /etc/zero1-tool/fan.conf
 fi
+if [[ -f /etc/zero1-tool/fan.conf ]] && ! grep -q '^ALWAYS_ON=' /etc/zero1-tool/fan.conf; then
+  printf 'ALWAYS_ON=0\n' >> /etc/zero1-tool/fan.conf
+fi
+if [[ -f /etc/zero1-tool/fan.conf ]] && ! grep -q '^IDLE_DUTY_PERCENT=' /etc/zero1-tool/fan.conf; then
+  printf 'IDLE_DUTY_PERCENT=20\n' >> /etc/zero1-tool/fan.conf
+fi
 if [[ ! -f /etc/zero1-tool/sata-led.conf ]]; then
   install -m 644 "${DIR}/sata-led.conf" /etc/zero1-tool/sata-led.conf
 fi
