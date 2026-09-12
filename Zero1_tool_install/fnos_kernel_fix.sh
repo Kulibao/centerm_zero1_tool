@@ -62,6 +62,12 @@ GPU_MODULES=(
     "rkgpu_bifrost_jm"
 )
 
+# Keep the boot partition from filling up after repeated kernel updates.  The
+# cleanup below removes only boot artifacts for kernels that are neither the
+# selected target, the selected fallback, nor the kernel currently running.
+# It intentionally leaves /lib/modules and package metadata untouched.
+AUTO_CLEAN_OLD_KERNELS=true
+
 # ==============================================
 # 阶段 0：升级内核（可选）
 # ==============================================
@@ -118,6 +124,97 @@ done
 if [[ -z "$OLD_KERNEL" ]]; then
     OLD_KERNEL="$OLDEST_KERNEL"
 fi
+
+is_kept_kernel() {
+    local kernel="$1"
+    local running
+    running="$(uname -r 2>/dev/null || true)"
+    [[ "$kernel" == "$NEW_KERNEL" || "$kernel" == "$OLD_KERNEL" || "$kernel" == "$running" ]]
+}
+
+cleanup_old_boot_files() {
+    [[ "$AUTO_CLEAN_OLD_KERNELS" == "true" ]] || return 0
+
+    echo "[Preflight] Cleaning unused kernel boot files..."
+    local path base version size removed=0 freed=0
+
+    # grub-mkconfig writes this temporary file before replacing grub.cfg.  If
+    # the filesystem filled during generation, it can be left behind.
+    if [[ -f "${GRUB_CFG}.new" && -f "${GRUB_CFG}" ]]; then
+        size=$(stat -c%s "${GRUB_CFG}.new" 2>/dev/null || echo 0)
+        rm -f -- "${GRUB_CFG}.new"
+        removed=$((removed + 1))
+        freed=$((freed + size))
+        echo "  Removed stale: ${GRUB_CFG}.new"
+    fi
+
+    # Remove only files whose names identify an old kernel version.  A version
+    # is kept when it is the target, fallback, or currently running kernel.
+    for path in /boot/vmlinuz-* /boot/initrd.img-* /boot/uInitrd-* /boot/System.map-* /boot/config-*; do
+        [[ -e "$path" || -L "$path" ]] || continue
+        base="${path##*/}"
+        case "$base" in
+            vmlinuz-*)    version="${base#vmlinuz-}" ;;
+            initrd.img-*) version="${base#initrd.img-}" ;;
+            uInitrd-*)    version="${base#uInitrd-}" ;;
+            System.map-*) version="${base#System.map-}" ;;
+            config-*)     version="${base#config-}" ;;
+            *)            continue ;;
+        esac
+
+        # Temporary files are handled below so their suffix never becomes a
+        # kernel version by accident.
+        [[ "$version" == *.new ]] && continue
+        if ! is_kept_kernel "$version"; then
+            size=$(stat -c%s "$path" 2>/dev/null || echo 0)
+            rm -f -- "$path"
+            removed=$((removed + 1))
+            freed=$((freed + size))
+            echo "  Removed old kernel file: ${path}"
+        fi
+    done
+
+    # Clean temporary initramfs/uInitrd files only when the final image exists,
+    # so an interrupted generation cannot lose the only usable image.
+    for path in /boot/initrd.img-*.new /boot/uInitrd-*.new; do
+        [[ -f "$path" ]] || continue
+        base="${path##*/}"
+        case "$base" in
+            initrd.img-*) version="${base#initrd.img-}" ;;
+            uInitrd-*)    version="${base#uInitrd-}" ;;
+            *)            continue ;;
+        esac
+        version="${version%.new}"
+        if [[ -f "/boot/initrd.img-${version}" || -f "/boot/uInitrd-${version}" ]]; then
+            size=$(stat -c%s "$path" 2>/dev/null || echo 0)
+            rm -f -- "$path"
+            removed=$((removed + 1))
+            freed=$((freed + size))
+            echo "  Removed stale temporary image: ${path}"
+        fi
+    done
+
+    if (( removed == 0 )); then
+        echo "  No unused kernel boot files found"
+    else
+        printf '  Freed approximately %.1f MiB\n' "$(awk -v bytes="$freed" 'BEGIN { printf "%.1f", bytes / 1048576 }')" 2>/dev/null || true
+    fi
+    sync
+
+    local free_kb
+    free_kb="$(df -Pk /boot 2>/dev/null | awk 'NR==2 {print $4 + 0}')"
+    if [[ -n "$free_kb" ]]; then
+        echo "  /boot free space: ${free_kb} KB"
+        if (( free_kb < 32768 )); then
+            echo "  ERROR: /boot still has less than 32 MiB free; aborting before boot changes"
+            echo "  Remove additional old kernel packages, then run this script again."
+            exit 1
+        fi
+    fi
+    echo ""
+}
+
+cleanup_old_boot_files
 
 echo " Detected kernels:"
 for k in $ALL_KERNELS; do
