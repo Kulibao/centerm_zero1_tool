@@ -24,7 +24,7 @@ if [[ "$DIR" != "$INSTALL_ROOT" ]]; then
   exit 1
 fi
 ORIGINAL_ROOT="${DIR}/original_files"
-for original_name in beep-boot.service beep-short.sh buzzer-test.sh fan_temp_control.sh fan-control.service install_all.sh power-key.sh power-led-solid.service power-led-solid.sh README_INSTALL.txt rk3568-nanopi-r5s-new.dtb sata-led-enable.service sata-led-enable.sh sata-led-manager.service sata-led-manager.sh triggerhappy-power-key.conf; do
+for original_name in beep-boot.service beep-short.sh buzzer-test.sh fan_temp_control.sh fan-control.service install_all.sh power-key.sh power-led-solid.service power-led-solid.sh rk3568-nanopi-r5s-new.dtb sata-led-enable.service sata-led-enable.sh sata-led-manager.service sata-led-manager.sh triggerhappy-power-key.conf; do
   if [[ ! -f "${ORIGINAL_ROOT}/${original_name}" ]]; then
     echo "Missing original_files/${original_name}; installation stopped."
     exit 1
