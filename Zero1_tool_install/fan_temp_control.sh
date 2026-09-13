@@ -20,9 +20,9 @@ TEMP_OFF=50
 TEMP_LOW=55
 TEMP_FULL=70
 TEMP_CRITICAL=90
-FAN_DUTY_MIN=60
-ALWAYS_ON=0
-IDLE_DUTY_PERCENT=20
+FAN_DUTY_MIN=50
+ALWAYS_ON=1
+IDLE_DUTY_PERCENT=30
 CHECK_INTERVAL=3
 LOG_RETENTION_DAYS=3
 LOG_ENABLED=1
@@ -108,9 +108,9 @@ load_config() {
     is_uint "$low" && (( low > off && low <= 80 )) || low=55
     is_uint "$full" && (( full > low && full <= 90 )) || full=70
     is_uint "$critical" && (( critical >= full && critical <= 105 )) || critical=90
-    is_uint "$min" && (( min >= 40 && min <= 100 )) || min=60
-    [[ "$always" = 0 || "$always" = 1 ]] || always=0
-    is_uint "$idle" && (( idle >= 10 && idle <= 40 )) || idle=20
+    is_uint "$min" && (( min >= 40 && min <= 100 )) || min=50
+    [[ "$always" = 0 || "$always" = 1 ]] || always=1
+    is_uint "$idle" && (( idle >= 10 && idle <= 40 )) || idle=30
     is_uint "$interval" && (( interval >= 1 && interval <= 30 )) || interval=3
     is_uint "$retention" && (( retention >= 1 && retention <= 30 )) || retention=3
     [[ "$enabled" = 0 || "$enabled" = 1 ]] || enabled=1
