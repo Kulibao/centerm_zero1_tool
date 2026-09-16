@@ -2,8 +2,9 @@
 set -eu
 
 CONFIG=/etc/zero1-tool/fan.conf
-CURRENT_VERSION=2609162330
+CURRENT_VERSION=2609162357
 UPDATE_MANIFEST_URL=https://raw.githubusercontent.com/Kulibao/centerm_zero1_tool/main/update.txt
+UPDATE_MANIFEST_GITEE_URL=https://gitee.com/kulibaoa/centerm_zero1_tool/raw/master/update.txt
 SATA_CONFIG=/etc/zero1-tool/sata-led.conf
 BUZZER_CONFIG=/etc/zero1-tool/buzzer.conf
 EMMC_HEALTH=/etc/zero1-tool/emmc-health.json
@@ -348,12 +349,34 @@ npu_fix_json() {
 version_json() {
   printf '{"current_version":"%s","manifest_url":"%s"}\n' "$CURRENT_VERSION" "$UPDATE_MANIFEST_URL"
 }
+fetch_update_manifest() {
+  manifest_url="$UPDATE_MANIFEST_URL"
+  [ "${1:-github}" = gitee ] && manifest_url="$UPDATE_MANIFEST_GITEE_URL"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 8 --max-time 20 "$manifest_url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- --timeout=20 "$manifest_url"
+  else
+    return 1
+  fi
+}
+update_manifest_json() {
+  manifest_source="${1:-github}"
+  case "$manifest_source" in github|gitee) :;; *) error '更新源无效';; esac
+  manifest_text=$(fetch_update_manifest "$manifest_source" 2>/dev/null) || error '无法读取更新源，请检查网络连接'
+  header
+  printf '{"source":"%s","text":"%s"}\n' "$manifest_source" "$(printf '%s' "$manifest_text" | json_escape)"
+}
 
 action=$(printf '%s' "${QUERY_STRING:-}" | sed -n 's/^action=\([^&]*\).*$/\1/p')
+source=$(printf '%s' "${QUERY_STRING:-}" | tr '&' '\n' | sed -n 's/^source=//p' | head -n 1)
 case "$action" in
   version)
     header
     version_json
+    ;;
+  update_manifest)
+    update_manifest_json "${source:-github}"
     ;;
   status)
     header

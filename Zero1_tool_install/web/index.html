@@ -207,7 +207,7 @@
   </style>
   <script>
     (()=>{
-      const FALLBACK_VERSION='2609162330';
+      const FALLBACK_VERSION='2609162357';
       const FALLBACK_MANIFEST='https://raw.githubusercontent.com/Kulibao/centerm_zero1_tool/main/update.txt';
       const UPDATE_SOURCES={
         github:FALLBACK_MANIFEST,
@@ -228,7 +228,7 @@
       const loadFooterVersion=async()=>{if(!footerVersion)return;try{const backend=await api('version');footerVersion.textContent=backend.current_version||'获取失败'}catch(error){footerVersion.textContent='获取失败'}};
       const setMessage=(text,bad=false)=>{message.textContent=text;message.style.color=bad?'var(--red)':'var(--green)'};
       const parseManifest=text=>{const out={};String(text||'').split(/\r?\n/).forEach(line=>{const m=line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);if(m)out[m[1]]=m[2].replace(/^['"]|['"]$/g,'')});return out};
-      const getInfo=async()=>{fetchButton.disabled=true;downloadButton.disabled=true;updateUrl='';setMessage('正在获取版本信息...');try{const backend=await api('version');const currentVersion=backend.current_version||FALLBACK_VERSION;current.textContent=currentVersion;const selectedSource=(sourceRadios.find(radio=>radio.checked)||{}).value==='gitee'?'gitee':'github';const manifestUrl=selectedSource==='github'?(backend.manifest_url||UPDATE_SOURCES.github):UPDATE_SOURCES.gitee;const response=await fetch(manifestUrl+'?t='+Date.now(),{cache:'no-store'});if(!response.ok)throw Error('更新源请求失败（HTTP '+response.status+'）');const manifest=parseManifest(await response.text());const latestVersion=manifest.latest_version||manifest.version;if(!latestVersion)throw Error('update.txt 中没有 latest_version');latest.textContent=latestVersion;updateUrl=manifest.download_url||manifest.url||'';if(updateUrl)downloadButton.disabled=false;setMessage(latestVersion===currentVersion?'当前已经是最新版本。':`发现新版本 ${latestVersion}。`)}catch(error){latest.textContent='获取失败';setMessage('获取更新信息失败：'+error.message,true)}finally{fetchButton.disabled=false}};
+      const getInfo=async()=>{fetchButton.disabled=true;downloadButton.disabled=true;updateUrl='';setMessage('正在获取版本信息...');try{const backend=await api('version');const currentVersion=backend.current_version||FALLBACK_VERSION;current.textContent=currentVersion;const selectedSource=(sourceRadios.find(radio=>radio.checked)||{}).value==='gitee'?'gitee':'github';const manifest= parseManifest((await api('update_manifest&source='+selectedSource)).text);const latestVersion=manifest.latest_version||manifest.version;if(!latestVersion)throw Error('update.txt 中没有 latest_version');latest.textContent=latestVersion;updateUrl=manifest.download_url||manifest.url||'';if(updateUrl)downloadButton.disabled=false;setMessage(latestVersion===currentVersion?'当前已经是最新版本。':`发现新版本 ${latestVersion}。`)}catch(error){latest.textContent='获取失败';setMessage('获取更新信息失败：'+error.message,true)}finally{fetchButton.disabled=false}};
       const open=()=>{backdrop.hidden=false;getInfo()};
       const close=()=>{backdrop.hidden=true};
       button.addEventListener('click',open);backdrop.querySelector('.settings-close').addEventListener('click',close);backdrop.addEventListener('click',event=>{if(event.target===backdrop)close()});sourceRadios.forEach(radio=>radio.addEventListener('change',getInfo));fetchButton.addEventListener('click',getInfo);downloadButton.addEventListener('click',()=>{if(updateUrl)window.open(updateUrl,'_blank','noopener,noreferrer')});document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!backdrop.hidden)close()});
