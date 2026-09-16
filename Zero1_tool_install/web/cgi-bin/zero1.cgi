@@ -2,6 +2,8 @@
 set -eu
 
 CONFIG=/etc/zero1-tool/fan.conf
+CURRENT_VERSION=2609161756
+UPDATE_MANIFEST_URL=https://raw.githubusercontent.com/Kulibao/centerm_zero1_tool/main/update.txt
 SATA_CONFIG=/etc/zero1-tool/sata-led.conf
 BUZZER_CONFIG=/etc/zero1-tool/buzzer.conf
 EMMC_HEALTH=/etc/zero1-tool/emmc-health.json
@@ -16,6 +18,10 @@ NPU_FIX=/home/anna/Zero1_tool_install/fnos_npu_fix.sh
 NPU_FIX_PID=${KERNEL_FIX_DIR}/npu-fix.pid
 NPU_FIX_LOG=${KERNEL_FIX_DIR}/npu-fix.log
 NPU_FIX_RESULT=${KERNEL_FIX_DIR}/npu-fix.result
+MAC_SCRIPT=/home/anna/Zero1_tool_install/zero1-set-mac.sh
+MAC_STATE=/etc/zero1-custom-mac.conf
+MAC_CHANGE_PID=${KERNEL_FIX_DIR}/mac-change.pid
+MAC_CHANGE_LOG=${KERNEL_FIX_DIR}/mac-change.log
 SLOT1_PATH='/sys/devices/platform/fc400000.sata/ata*/host*/target*:*:*/*:*:*:*/block'
 SLOT2_PATH='/sys/devices/platform/fc800000.sata/ata*/host*/target*:*:*/*:*:*:*/block'
 DISK_TEMP_CACHE_SECONDS=30
@@ -29,7 +35,94 @@ get_sata_value() { sed -n "s/^$1=//p" "$SATA_CONFIG" 2>/dev/null | tail -n 1; }
 get_buzzer_value() { sed -n "s/^$1=//p" "$BUZZER_CONFIG" 2>/dev/null | tail -n 1; }
 is_uint() { case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac; }
 in_range() { is_uint "$1" && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
-urldecode() { printf '%b' "$(printf '%s' "$1" | sed 's/+/ /g;s/%/\\x/g')"; }
+normalize_mac() {
+  # Accept the normal colon form plus URL-encoded colons.  Building the
+  # canonical value here avoids ash/locale pattern differences and also
+  # handles clients that submit a hyphenated or unseparated MAC.
+  printf '%s\n' "$1" | awk '
+    function ishex(s, i, c) {
+      if (length(s) != 2) return 0
+      for (i = 1; i <= 2; i++) {
+        c = substr(s, i, 1)
+        if (c !~ /^[0-9A-Fa-f]$/) return 0
+      }
+      return 1
+    }
+    {
+      gsub(/%3[Aa]/, ":")
+      gsub(/%2[Dd]/, ":")
+      gsub(/-/, ":")
+      gsub(/[[:space:]\r]/, "")
+      count = split($0, octet, ":")
+      if (count == 1) {
+        compact = $0
+        if (length(compact) != 12) exit 1
+        count = 6
+        for (i = 1; i <= 6; i++) octet[i] = substr(compact, (i - 1) * 2 + 1, 2)
+      }
+      if (count != 6) exit 1
+      result = ""
+      for (i = 1; i <= 6; i++) {
+        if (!ishex(octet[i])) exit 1
+        result = result (i > 1 ? ":" : "") tolower(octet[i])
+      }
+      print result
+      found = 1
+      exit 0
+    }
+    END { if (!found) exit 1 }
+  '
+}
+
+is_mac() {
+  [ -n "$(normalize_mac "$1" 2>/dev/null || true)" ]
+}
+mac_is_running() {
+  [ -s "$MAC_CHANGE_PID" ] || return 1
+  pid=$(cat "$MAC_CHANGE_PID" 2>/dev/null || true)
+  case "$pid" in ''|*[!0-9]*) return 1;; esac
+  kill -0 "$pid" 2>/dev/null
+}
+mac_config_json() {
+  current=$(cat /sys/class/net/eth0/address 2>/dev/null | tr 'A-F' 'a-f' || true)
+  persistent=$(sed -n 's/^MAC_ADDRESS=//p' "$MAC_STATE" 2>/dev/null | tail -n 1 | tr 'A-F' 'a-f' || true)
+  is_mac "$current" || current=''
+  is_mac "$persistent" || persistent=''
+  running=false; mac_is_running && running=true
+  output=''
+  [ -r "$MAC_CHANGE_LOG" ] && output=$(tail -n 160 "$MAC_CHANGE_LOG" 2>/dev/null | json_escape || true)
+  printf '{"current":%s,"persistent":%s,"running":%s,"output":"%s"}\n' "$(json_quote "$current")" "$(json_quote "$persistent")" "$running" "$output"
+}
+urldecode() {
+  # BusyBox printf does not decode \\xHH consistently. Decode percent bytes
+  # with awk so values such as 56%3A96%3A81%3A5D%3AD8%3A28 survive CGI parsing.
+  printf '%s' "$1" | awk '
+    BEGIN { hex="0123456789abcdef" }
+    {
+      text=$0; decoded=""
+      for (i=1; i<=length(text); i++) {
+        ch=substr(text,i,1)
+        if (ch == "+") {
+          decoded=decoded " "
+        } else if (ch == "%" && i+2 <= length(text)) {
+          high=substr(text,i+1,1); low=substr(text,i+2,1)
+          high_pos=index(hex,tolower(high)); low_pos=index(hex,tolower(low))
+          if (high_pos && low_pos) {
+            high_num=high_pos-1
+            low_num=low_pos-1
+            decoded=decoded sprintf("%c",high_num*16+low_num)
+            i+=2
+          } else {
+            decoded=decoded ch
+          }
+        } else {
+          decoded=decoded ch
+        }
+      }
+      printf "%s", decoded
+    }
+  '
+}
 slot_dev() {
   # The argument contains the board-specific sysfs glob and must expand here.
   ls $1 2>/dev/null | head -n 1 || true
@@ -252,9 +345,16 @@ npu_fix_json() {
   [ -r "$NPU_FIX_LOG" ] && text=$(tail -n 160 "$NPU_FIX_LOG" | json_escape)
   printf '{"running":%s,"started_at":"%s","exit_code":%s,"text":"%s"}\n' "$running" "$started" "$result" "$text"
 }
+version_json() {
+  printf '{"current_version":"%s","manifest_url":"%s"}\n' "$CURRENT_VERSION" "$UPDATE_MANIFEST_URL"
+}
 
 action=$(printf '%s' "${QUERY_STRING:-}" | sed -n 's/^action=\([^&]*\).*$/\1/p')
 case "$action" in
+  version)
+    header
+    version_json
+    ;;
   status)
     header
     if [ -r "$STATUS" ]; then
@@ -276,11 +376,45 @@ case "$action" in
     enabled="$(get_value LOG_ENABLED)"
     [ "$enabled" = 0 ] || enabled=1
     always_on="$(get_value ALWAYS_ON)"
-    [ "$always_on" = 1 ] || always_on=0
+    [ "$always_on" = 0 ] || [ "$always_on" = 1 ] || always_on=1
     idle_duty="$(get_value IDLE_DUTY_PERCENT)"
-    in_range "$idle_duty" 10 40 || idle_duty=20
+    in_range "$idle_duty" 10 40 || idle_duty=30
     printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","ALWAYS_ON":"%s","IDLE_DUTY_PERCENT":"%s","CHECK_INTERVAL":"%s","LOG_RETENTION_DAYS":"%s","LOG_ENABLED":"%s","STANDBY_BLINK":"%s","BOOT_BEEP":"%s"}\n' \
       "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$always_on" "$idle_duty" "$(get_value CHECK_INTERVAL)" "$retention" "$enabled" "$(get_sata_value STANDBY_BLINK)" "$(get_buzzer_value BOOT_BEEP)"
+    ;;
+  mac_config)
+    header
+    mac_config_json
+    ;;
+  save_mac)
+    [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
+    length=${CONTENT_LENGTH:-0}; in_range "$length" 1 1024 || error '请求大小无效'
+    body=$(dd bs=1 count="$length" 2>/dev/null)
+    MAC_ADDRESS=''
+    oldifs=$IFS; IFS='&'
+    for item in $body; do
+      key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
+      [ "$key" = MAC_ADDRESS ] && MAC_ADDRESS="$value"
+    done
+    IFS=$oldifs
+    MAC_ADDRESS=$(normalize_mac "$MAC_ADDRESS" 2>/dev/null || true)
+    [ -n "$MAC_ADDRESS" ] || error 'MAC 地址格式无效，请填写六组两位十六进制字符'
+    first_octet=$(printf '%s\n' "${MAC_ADDRESS%%:*}" | awk '
+      BEGIN { hex="0123456789abcdef" }
+      { value=tolower($1); hi=index(hex, substr(value,1,1))-1; lo=index(hex, substr(value,2,1))-1; print hi*16+lo }
+    ')
+    [ "$MAC_ADDRESS" != '00:00:00:00:00:00' ] || error '不能使用全零 MAC 地址'
+    [ "$MAC_ADDRESS" != 'ff:ff:ff:ff:ff:ff' ] || error '不能使用广播 MAC 地址'
+    [ $((first_octet % 2)) -eq 0 ] || error '不能使用组播 MAC 地址，首字节最低位必须为 0'
+    [ -f "$MAC_SCRIPT" ] || error '未找到 MAC 修改脚本'
+    mac_is_running && conflict 'MAC 修改任务已经在运行，请等待设备重启'
+    mkdir -p "$KERNEL_FIX_DIR"
+    : > "$MAC_CHANGE_LOG"
+    date '+%Y-%m-%d %H:%M:%S' > "${MAC_CHANGE_LOG}.started"
+    nohup /bin/bash "$MAC_SCRIPT" "$MAC_ADDRESS" > "$MAC_CHANGE_LOG" 2>&1 </dev/null &
+    printf '%s\n' "$!" > "$MAC_CHANGE_PID"
+    header
+    printf '{"ok":true,"message":"MAC 配置已提交，设备将在 5 秒后自动重启"}\n'
     ;;
   emmc_health)
     header
@@ -446,9 +580,9 @@ case "$action" in
     body=$(dd bs=1 count="$length" 2>/dev/null)
     MODE=''; MANUAL_SPEED=''; TEMP_OFF=''; TEMP_LOW=''; TEMP_FULL=''; TEMP_CRITICAL=''; FAN_DUTY_MIN=''; CHECK_INTERVAL=''; SATA_STANDBY_BLINK="$(get_sata_value STANDBY_BLINK)"
     ALWAYS_ON="$(get_value ALWAYS_ON)"
-    [ "$ALWAYS_ON" = 1 ] || ALWAYS_ON=0
+    [ "$ALWAYS_ON" = 0 ] || [ "$ALWAYS_ON" = 1 ] || ALWAYS_ON=1
     IDLE_DUTY_PERCENT="$(get_value IDLE_DUTY_PERCENT)"
-    in_range "$IDLE_DUTY_PERCENT" 10 40 || IDLE_DUTY_PERCENT=20
+    in_range "$IDLE_DUTY_PERCENT" 10 40 || IDLE_DUTY_PERCENT=30
     LOG_RETENTION_DAYS="$(get_value LOG_RETENTION_DAYS)"
     in_range "$LOG_RETENTION_DAYS" 1 30 || LOG_RETENTION_DAYS=3
     LOG_ENABLED="$(get_value LOG_ENABLED)"

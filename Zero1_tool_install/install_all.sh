@@ -24,18 +24,19 @@ if [[ "$DIR" != "$INSTALL_ROOT" ]]; then
   exit 1
 fi
 ORIGINAL_ROOT="${DIR}/original_files"
-for original_name in beep-boot.service beep-short.sh buzzer-test.sh fan_temp_control.sh fan-control.service install_all.sh power-key.sh power-led-solid.service power-led-solid.sh README_INSTALL.txt rk3568-nanopi-r5s-new.dtb sata-led-enable.service sata-led-enable.sh sata-led-manager.service sata-led-manager.sh triggerhappy-power-key.conf; do
+for original_name in beep-boot.service beep-short.sh buzzer-test.sh fan_temp_control.sh fan-control.service install_all.sh power-key.sh power-led-solid.service power-led-solid.sh rk3568-nanopi-r5s-new.dtb sata-led-enable.service sata-led-enable.sh sata-led-manager.service sata-led-manager.sh triggerhappy-power-key.conf; do
   if [[ ! -f "${ORIGINAL_ROOT}/${original_name}" ]]; then
     echo "Missing original_files/${original_name}; installation stopped."
     exit 1
   fi
 done
-for required_name in zero1-lvm-activate.sh zero1-lvm-activate.service trim-init-lvm-activate.conf; do
+for required_name in zero1-lvm-activate.sh zero1-lvm-activate.service trim-init-lvm-activate.conf zero1-set-mac.sh; do
   if [[ ! -f "${DIR}/${required_name}" ]]; then
     echo "Missing ${required_name}; installation stopped."
     exit 1
   fi
 done
+chmod 755 "${DIR}/zero1-set-mac.sh"
 TS="$(date +%Y%m%d_%H%M%S)"
 
 SRC_DTB="${DIR}/rk3568-nanopi-r5s-new.dtb"
@@ -72,10 +73,10 @@ if [[ -f /etc/zero1-tool/fan.conf ]] && ! grep -q '^LOG_ENABLED=' /etc/zero1-too
   printf 'LOG_ENABLED=1\n' >> /etc/zero1-tool/fan.conf
 fi
 if [[ -f /etc/zero1-tool/fan.conf ]] && ! grep -q '^ALWAYS_ON=' /etc/zero1-tool/fan.conf; then
-  printf 'ALWAYS_ON=0\n' >> /etc/zero1-tool/fan.conf
+  printf 'ALWAYS_ON=1\n' >> /etc/zero1-tool/fan.conf
 fi
 if [[ -f /etc/zero1-tool/fan.conf ]] && ! grep -q '^IDLE_DUTY_PERCENT=' /etc/zero1-tool/fan.conf; then
-  printf 'IDLE_DUTY_PERCENT=20\n' >> /etc/zero1-tool/fan.conf
+  printf 'IDLE_DUTY_PERCENT=30\n' >> /etc/zero1-tool/fan.conf
 fi
 if [[ ! -f /etc/zero1-tool/sata-led.conf ]]; then
   install -m 644 "${DIR}/sata-led.conf" /etc/zero1-tool/sata-led.conf
