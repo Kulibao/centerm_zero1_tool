@@ -2,7 +2,7 @@
 set -eu
 
 CONFIG=/etc/zero1-tool/fan.conf
-CURRENT_VERSION=2609161756
+CURRENT_VERSION=2609162330
 UPDATE_MANIFEST_URL=https://raw.githubusercontent.com/Kulibao/centerm_zero1_tool/main/update.txt
 SATA_CONFIG=/etc/zero1-tool/sata-led.conf
 BUZZER_CONFIG=/etc/zero1-tool/buzzer.conf

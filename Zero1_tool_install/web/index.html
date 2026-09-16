@@ -183,6 +183,18 @@
     .settings-heading h2{font-size:17px}
     .settings-close{width:34px;min-width:34px;height:34px;min-height:34px;padding:0;border-color:var(--line);border-radius:50%;background:var(--surface-2);color:var(--muted);font-size:18px}
     .settings-section{padding:20px}
+    .version-source{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+    .version-source-label{color:var(--muted);font-size:12px;white-space:nowrap}
+    .version-source-options{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+    .version-source-option{position:relative;display:inline-flex;align-items:center;gap:7px;cursor:pointer;color:var(--text);font-size:12px;line-height:1.4}
+    .version-source-option input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+    .version-radio{position:relative;width:17px;height:17px;flex:0 0 17px;border:1px solid #536875;border-radius:50%;background:var(--surface-2);transition:.2s ease}
+    .version-radio::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px rgba(61,217,232,.55);transform:scale(0);transition:.2s ease}
+    .version-source-option input:checked+.version-radio{border-color:var(--cyan);background:var(--cyan-dim);box-shadow:0 0 0 2px rgba(61,217,232,.08)}
+    .version-source-option input:checked+.version-radio::after{transform:scale(1)}
+    .version-source-option input:focus-visible+.version-radio{outline:2px solid var(--cyan);outline-offset:2px}
+    html[data-theme=light] .version-radio{border-color:#8da4af;background:#f4f8f9}
+    html[data-theme=light] .version-source-option input:checked+.version-radio{background:var(--cyan-dim)}
     .version-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
     .version-item{min-width:0;border:1px solid var(--line);border-radius:7px;padding:13px 14px;background:var(--surface-2)}
     .version-label{display:block;color:var(--muted);font-size:11px}
@@ -195,8 +207,12 @@
   </style>
   <script>
     (()=>{
-      const FALLBACK_VERSION='2609161756';
+      const FALLBACK_VERSION='2609162330';
       const FALLBACK_MANIFEST='https://raw.githubusercontent.com/Kulibao/centerm_zero1_tool/main/update.txt';
+      const UPDATE_SOURCES={
+        github:FALLBACK_MANIFEST,
+        gitee:'https://gitee.com/kulibaoa/centerm_zero1_tool/raw/master/update.txt'
+      };
       let updateUrl='';
       const actions=document.querySelector('.status-actions');
       if(!actions)return;
@@ -205,17 +221,17 @@
       actions.insertBefore(button,actions.firstChild);
       const backdrop=document.createElement('div');
       backdrop.id='settingsBackdrop';backdrop.className='settings-backdrop';backdrop.hidden=true;
-      backdrop.innerHTML='<section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle"><div class="settings-heading"><h2 id="settingsTitle">设置</h2><button class="settings-close" type="button" aria-label="关闭设置">×</button></div><div class="settings-section"><div class="section-head"><h3>版本更新</h3><span class="section-index">UPDATE</span></div><div class="version-grid"><div class="version-item"><span class="version-label">当前版本</span><strong id="currentVersion" class="version-value">读取中</strong></div><div class="version-item"><span class="version-label">最新版本</span><strong id="latestVersion" class="version-value">尚未获取</strong><a id="latestDownload" class="version-link" href="#" target="_blank" rel="noopener noreferrer" hidden>打开下载地址</a></div></div><div class="version-actions"><button id="fetchUpdateInfo" type="button">获取信息</button><button id="downloadUpdate" class="alt" type="button" disabled>下载更新</button></div><p class="version-note">版本信息来自后端和 GitHub 项目根目录的 update.txt。下载更新会打开维护者提供的下载地址，不会自动安装或重启设备。</p><div id="versionMessage" class="version-message"></div></div></section>';
+      backdrop.innerHTML='<section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle"><div class="settings-heading"><h2 id="settingsTitle">设置</h2><button class="settings-close" type="button" aria-label="关闭设置">×</button></div><div class="settings-section"><div class="section-head"><h3>版本更新</h3><span class="section-index">UPDATE</span></div><div class="version-source"><span class="version-source-label">更新源</span><div class="version-source-options" role="radiogroup" aria-label="选择更新源"><label class="version-source-option"><input type="radio" name="updateSource" value="github" checked><span class="version-radio" aria-hidden="true"></span><span>GitHub</span></label><label class="version-source-option"><input type="radio" name="updateSource" value="gitee"><span class="version-radio" aria-hidden="true"></span><span>Gitee</span></label></div></div><div class="version-grid"><div class="version-item"><span class="version-label">当前版本</span><strong id="currentVersion" class="version-value">读取中</strong></div><div class="version-item"><span class="version-label">最新版本</span><strong id="latestVersion" class="version-value">尚未获取</strong></div></div><div class="version-actions"><button id="fetchUpdateInfo" type="button">获取信息</button><button id="downloadUpdate" class="alt" type="button" disabled>下载更新</button></div><p class="version-note">版本信息来自后端和项目仓库根目录的 update.txt。</p><div id="versionMessage" class="version-message"></div></div></section>';
       document.body.appendChild(backdrop);
-      const current=backdrop.querySelector('#currentVersion'),latest=backdrop.querySelector('#latestVersion'),link=backdrop.querySelector('#latestDownload'),fetchButton=backdrop.querySelector('#fetchUpdateInfo'),downloadButton=backdrop.querySelector('#downloadUpdate'),message=backdrop.querySelector('#versionMessage');
+      const current=backdrop.querySelector('#currentVersion'),latest=backdrop.querySelector('#latestVersion'),sourceRadios=[...backdrop.querySelectorAll('input[name="updateSource"]')],fetchButton=backdrop.querySelector('#fetchUpdateInfo'),downloadButton=backdrop.querySelector('#downloadUpdate'),message=backdrop.querySelector('#versionMessage');
       const footerVersion=document.getElementById('footerVersion');
       const loadFooterVersion=async()=>{if(!footerVersion)return;try{const backend=await api('version');footerVersion.textContent=backend.current_version||'获取失败'}catch(error){footerVersion.textContent='获取失败'}};
       const setMessage=(text,bad=false)=>{message.textContent=text;message.style.color=bad?'var(--red)':'var(--green)'};
       const parseManifest=text=>{const out={};String(text||'').split(/\r?\n/).forEach(line=>{const m=line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);if(m)out[m[1]]=m[2].replace(/^['"]|['"]$/g,'')});return out};
-      const getInfo=async()=>{fetchButton.disabled=true;downloadButton.disabled=true;link.hidden=true;updateUrl='';setMessage('正在获取版本信息...');try{const backend=await api('version');const currentVersion=backend.current_version||FALLBACK_VERSION;current.textContent=currentVersion;const manifestUrl=backend.manifest_url||FALLBACK_MANIFEST;const response=await fetch(manifestUrl+'?t='+Date.now(),{cache:'no-store'});if(!response.ok)throw Error('GitHub 清单请求失败（HTTP '+response.status+'）');const manifest=parseManifest(await response.text());const latestVersion=manifest.latest_version||manifest.version;if(!latestVersion)throw Error('update.txt 中没有 latest_version');latest.textContent=latestVersion;updateUrl=manifest.download_url||manifest.url||'';if(updateUrl){link.href=updateUrl;link.hidden=false;downloadButton.disabled=false}setMessage(latestVersion===currentVersion?'当前已经是最新版本。':`发现新版本 ${latestVersion}。`)}catch(error){latest.textContent='获取失败';setMessage('获取更新信息失败：'+error.message,true)}finally{fetchButton.disabled=false}};
+      const getInfo=async()=>{fetchButton.disabled=true;downloadButton.disabled=true;updateUrl='';setMessage('正在获取版本信息...');try{const backend=await api('version');const currentVersion=backend.current_version||FALLBACK_VERSION;current.textContent=currentVersion;const selectedSource=(sourceRadios.find(radio=>radio.checked)||{}).value==='gitee'?'gitee':'github';const manifestUrl=selectedSource==='github'?(backend.manifest_url||UPDATE_SOURCES.github):UPDATE_SOURCES.gitee;const response=await fetch(manifestUrl+'?t='+Date.now(),{cache:'no-store'});if(!response.ok)throw Error('更新源请求失败（HTTP '+response.status+'）');const manifest=parseManifest(await response.text());const latestVersion=manifest.latest_version||manifest.version;if(!latestVersion)throw Error('update.txt 中没有 latest_version');latest.textContent=latestVersion;updateUrl=manifest.download_url||manifest.url||'';if(updateUrl)downloadButton.disabled=false;setMessage(latestVersion===currentVersion?'当前已经是最新版本。':`发现新版本 ${latestVersion}。`)}catch(error){latest.textContent='获取失败';setMessage('获取更新信息失败：'+error.message,true)}finally{fetchButton.disabled=false}};
       const open=()=>{backdrop.hidden=false;getInfo()};
       const close=()=>{backdrop.hidden=true};
-      button.addEventListener('click',open);backdrop.querySelector('.settings-close').addEventListener('click',close);backdrop.addEventListener('click',event=>{if(event.target===backdrop)close()});fetchButton.addEventListener('click',getInfo);downloadButton.addEventListener('click',()=>{if(updateUrl)window.open(updateUrl,'_blank','noopener,noreferrer')});document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!backdrop.hidden)close()});
+      button.addEventListener('click',open);backdrop.querySelector('.settings-close').addEventListener('click',close);backdrop.addEventListener('click',event=>{if(event.target===backdrop)close()});sourceRadios.forEach(radio=>radio.addEventListener('change',getInfo));fetchButton.addEventListener('click',getInfo);downloadButton.addEventListener('click',()=>{if(updateUrl)window.open(updateUrl,'_blank','noopener,noreferrer')});document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!backdrop.hidden)close()});
       loadFooterVersion();
     })();
   </script>
