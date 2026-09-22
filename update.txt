@@ -1,4 +1,3 @@
 # Zero1 Tool update manifest
-# Replace download_url with the actual package or release URL when publishing an update.
-latest_version=2609162357
-download_url=https://github.com/Kulibao/centerm_zero1_tool/releases/download/Zero1_tool_2609162357/Zero1_tool_2609162357.zip
+latest_version=2609222121
+download_url=https://github.com/Kulibao/centerm_zero1_tool/releases/download/Zero1_tool_2609222121/Zero1_tool_2609222121.zip

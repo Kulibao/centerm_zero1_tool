@@ -2,8 +2,8 @@
 set -eu
 
 CONFIG=/etc/zero1-tool/fan.conf
-CURRENT_VERSION=2609162357
-UPDATE_MANIFEST_URL=https://raw.githubusercontent.com/Kulibao/centerm_zero1_tool/main/update.txt
+CURRENT_VERSION=2609222121
+UPDATE_MANIFEST_URL=https://gitee.com/kulibaoa/centerm_zero1_tool/raw/master/update.txt
 UPDATE_MANIFEST_GITEE_URL=https://gitee.com/kulibaoa/centerm_zero1_tool/raw/master/update.txt
 SATA_CONFIG=/etc/zero1-tool/sata-led.conf
 BUZZER_CONFIG=/etc/zero1-tool/buzzer.conf
@@ -361,7 +361,7 @@ fetch_update_manifest() {
   fi
 }
 update_manifest_json() {
-  manifest_source="${1:-github}"
+  manifest_source="${1:-gitee}"
   case "$manifest_source" in github|gitee) :;; *) error '更新源无效';; esac
   manifest_text=$(fetch_update_manifest "$manifest_source" 2>/dev/null) || error '无法读取更新源，请检查网络连接'
   header
@@ -376,7 +376,7 @@ case "$action" in
     version_json
     ;;
   update_manifest)
-    update_manifest_json "${source:-github}"
+    update_manifest_json "${source:-gitee}"
     ;;
   status)
     header
@@ -402,8 +402,11 @@ case "$action" in
     [ "$always_on" = 0 ] || [ "$always_on" = 1 ] || always_on=1
     idle_duty="$(get_value IDLE_DUTY_PERCENT)"
     in_range "$idle_duty" 10 40 || idle_duty=30
-    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","ALWAYS_ON":"%s","IDLE_DUTY_PERCENT":"%s","CHECK_INTERVAL":"%s","LOG_RETENTION_DAYS":"%s","LOG_ENABLED":"%s","STANDBY_BLINK":"%s","BOOT_BEEP":"%s"}\n' \
-      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$always_on" "$idle_duty" "$(get_value CHECK_INTERVAL)" "$retention" "$enabled" "$(get_sata_value STANDBY_BLINK)" "$(get_buzzer_value BOOT_BEEP)"
+    led1_enabled="$(get_sata_value LED1_ENABLED)"; [ "$led1_enabled" = 0 ] || led1_enabled=1
+    led2_enabled="$(get_sata_value LED2_ENABLED)"; [ "$led2_enabled" = 0 ] || led2_enabled=1
+    standby_blink="$(get_sata_value STANDBY_BLINK)"; [ "$standby_blink" = 0 ] || standby_blink=1
+    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","ALWAYS_ON":"%s","IDLE_DUTY_PERCENT":"%s","CHECK_INTERVAL":"%s","LOG_RETENTION_DAYS":"%s","LOG_ENABLED":"%s","STANDBY_BLINK":"%s","SATA_LED1_ENABLED":"%s","SATA_LED2_ENABLED":"%s","BOOT_BEEP":"%s"}\n' \
+      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$always_on" "$idle_duty" "$(get_value CHECK_INTERVAL)" "$retention" "$enabled" "$standby_blink" "$led1_enabled" "$led2_enabled" "$(get_buzzer_value BOOT_BEEP)"
     ;;
   mac_config)
     header
@@ -511,17 +514,33 @@ case "$action" in
     [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
     length=${CONTENT_LENGTH:-0}; in_range "$length" 1 1024 || error '请求大小无效'
     body=$(dd bs=1 count="$length" 2>/dev/null)
-    SATA_STANDBY_BLINK=''
+    SATA_STANDBY_BLINK="$(get_sata_value STANDBY_BLINK)"
+    SATA_LED1_ENABLED="$(get_sata_value LED1_ENABLED)"
+    SATA_LED2_ENABLED="$(get_sata_value LED2_ENABLED)"
+    [ "$SATA_STANDBY_BLINK" = 0 ] || SATA_STANDBY_BLINK=1
+    [ "$SATA_LED1_ENABLED" = 0 ] || SATA_LED1_ENABLED=1
+    [ "$SATA_LED2_ENABLED" = 0 ] || SATA_LED2_ENABLED=1
     oldifs=$IFS; IFS='&'
     for item in $body; do
       key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
-      [ "$key" = SATA_STANDBY_BLINK ] && SATA_STANDBY_BLINK="$value"
+      case "$key" in
+        SATA_STANDBY_BLINK) SATA_STANDBY_BLINK="$value";;
+        SATA_LED1_ENABLED) SATA_LED1_ENABLED="$value";;
+        SATA_LED2_ENABLED) SATA_LED2_ENABLED="$value";;
+      esac
     done
     IFS=$oldifs
     [ "$SATA_STANDBY_BLINK" = 0 ] || [ "$SATA_STANDBY_BLINK" = 1 ] || error '休眠闪烁开关无效'
+    [ "$SATA_LED1_ENABLED" = 0 ] || [ "$SATA_LED1_ENABLED" = 1 ] || error '硬盘1指示灯开关无效'
+    [ "$SATA_LED2_ENABLED" = 0 ] || [ "$SATA_LED2_ENABLED" = 1 ] || error '硬盘2指示灯开关无效'
     mkdir -p /etc/zero1-tool
     sata_tmp="${SATA_CONFIG}.tmp.$$"
-    { echo '# Managed by T-NAS Zero1tool'; echo "STANDBY_BLINK=$SATA_STANDBY_BLINK"; } > "$sata_tmp"
+    {
+      echo '# Managed by T-NAS Zero1tool'
+      echo "STANDBY_BLINK=$SATA_STANDBY_BLINK"
+      echo "LED1_ENABLED=$SATA_LED1_ENABLED"
+      echo "LED2_ENABLED=$SATA_LED2_ENABLED"
+    } > "$sata_tmp"
     mv "$sata_tmp" "$SATA_CONFIG"
     systemctl kill -s HUP sata-led-manager.service 2>/dev/null || systemctl restart sata-led-manager.service 2>/dev/null || true
     header; printf '{"ok":true}\n'
@@ -601,7 +620,7 @@ case "$action" in
     [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
     length=${CONTENT_LENGTH:-0}; in_range "$length" 1 8192 || error '请求大小无效'
     body=$(dd bs=1 count="$length" 2>/dev/null)
-    MODE=''; MANUAL_SPEED=''; TEMP_OFF=''; TEMP_LOW=''; TEMP_FULL=''; TEMP_CRITICAL=''; FAN_DUTY_MIN=''; CHECK_INTERVAL=''; SATA_STANDBY_BLINK="$(get_sata_value STANDBY_BLINK)"
+    MODE=''; MANUAL_SPEED=''; TEMP_OFF=''; TEMP_LOW=''; TEMP_FULL=''; TEMP_CRITICAL=''; FAN_DUTY_MIN=''; CHECK_INTERVAL=''; SATA_STANDBY_BLINK="$(get_sata_value STANDBY_BLINK)"; SATA_LED1_ENABLED="$(get_sata_value LED1_ENABLED)"; SATA_LED2_ENABLED="$(get_sata_value LED2_ENABLED)"
     ALWAYS_ON="$(get_value ALWAYS_ON)"
     [ "$ALWAYS_ON" = 0 ] || [ "$ALWAYS_ON" = 1 ] || ALWAYS_ON=1
     IDLE_DUTY_PERCENT="$(get_value IDLE_DUTY_PERCENT)"
@@ -611,11 +630,13 @@ case "$action" in
     LOG_ENABLED="$(get_value LOG_ENABLED)"
     [ "$LOG_ENABLED" = 0 ] || [ "$LOG_ENABLED" = 1 ] || LOG_ENABLED=1
     [ "$SATA_STANDBY_BLINK" = 0 ] || SATA_STANDBY_BLINK=1
+    [ "$SATA_LED1_ENABLED" = 0 ] || SATA_LED1_ENABLED=1
+    [ "$SATA_LED2_ENABLED" = 0 ] || SATA_LED2_ENABLED=1
     oldifs=$IFS; IFS='&'
     for item in $body; do
       key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
       case "$key" in
-        MODE) MODE="$value";; MANUAL_SPEED) MANUAL_SPEED="$value";; TEMP_OFF) TEMP_OFF="$value";; TEMP_LOW) TEMP_LOW="$value";; TEMP_FULL) TEMP_FULL="$value";; TEMP_CRITICAL) TEMP_CRITICAL="$value";; FAN_DUTY_MIN) FAN_DUTY_MIN="$value";; ALWAYS_ON) ALWAYS_ON="$value";; IDLE_DUTY_PERCENT) IDLE_DUTY_PERCENT="$value";; CHECK_INTERVAL) CHECK_INTERVAL="$value";; SATA_STANDBY_BLINK) SATA_STANDBY_BLINK="$value";;
+        MODE) MODE="$value";; MANUAL_SPEED) MANUAL_SPEED="$value";; TEMP_OFF) TEMP_OFF="$value";; TEMP_LOW) TEMP_LOW="$value";; TEMP_FULL) TEMP_FULL="$value";; TEMP_CRITICAL) TEMP_CRITICAL="$value";; FAN_DUTY_MIN) FAN_DUTY_MIN="$value";; ALWAYS_ON) ALWAYS_ON="$value";; IDLE_DUTY_PERCENT) IDLE_DUTY_PERCENT="$value";; CHECK_INTERVAL) CHECK_INTERVAL="$value";; SATA_STANDBY_BLINK) SATA_STANDBY_BLINK="$value";; SATA_LED1_ENABLED) SATA_LED1_ENABLED="$value";; SATA_LED2_ENABLED) SATA_LED2_ENABLED="$value";;
       esac
     done
     IFS=$oldifs
@@ -630,6 +651,8 @@ case "$action" in
     in_range "$IDLE_DUTY_PERCENT" 10 40 || error '低温运行功率必须是10到40'
     in_range "$CHECK_INTERVAL" 1 30 || error '检测间隔必须是1到30秒'
     [ "$SATA_STANDBY_BLINK" = 0 ] || [ "$SATA_STANDBY_BLINK" = 1 ] || error '休眠闪烁开关无效'
+    [ "$SATA_LED1_ENABLED" = 0 ] || [ "$SATA_LED1_ENABLED" = 1 ] || error '硬盘1指示灯开关无效'
+    [ "$SATA_LED2_ENABLED" = 0 ] || [ "$SATA_LED2_ENABLED" = 1 ] || error '硬盘2指示灯开关无效'
     [ "$TEMP_OFF" -lt "$TEMP_LOW" ] && [ "$TEMP_LOW" -lt "$TEMP_FULL" ] && [ "$TEMP_FULL" -le "$TEMP_CRITICAL" ] || error '温度阈值必须依次升高'
     mkdir -p /etc/zero1-tool
     tmp="${CONFIG}.tmp.$$"
@@ -644,6 +667,8 @@ case "$action" in
     {
       echo '# Managed by T-NAS Zero1tool'
       echo "STANDBY_BLINK=$SATA_STANDBY_BLINK"
+      echo "LED1_ENABLED=$SATA_LED1_ENABLED"
+      echo "LED2_ENABLED=$SATA_LED2_ENABLED"
     } > "$sata_tmp"
     mv "$sata_tmp" "$SATA_CONFIG"
     systemctl kill -s HUP fan-control.service 2>/dev/null || systemctl restart fan-control.service 2>/dev/null || true

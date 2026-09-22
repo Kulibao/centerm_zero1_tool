@@ -16,6 +16,8 @@ SLOW_BLINK_TICKS=5         # 5 x 0.2s on, 5 x 0.2s off = approximately 0.5Hz
 HDPARM=/sbin/hdparm
 CONFIG_FILE=/etc/zero1-tool/sata-led.conf
 STANDBY_BLINK=1
+LED1_ENABLED=1
+LED2_ENABLED=1
 RELOAD_CONFIG=0
 
 SLOT1_PATH="/sys/devices/platform/fc400000.sata/ata*/host*/target*:*:*/*:*:*:*/block"
@@ -29,6 +31,8 @@ load_config() {
     value="${value//[[:space:]]/}"
     case "$key" in
       STANDBY_BLINK) [[ "$value" == 0 || "$value" == 1 ]] && STANDBY_BLINK="$value";;
+      LED1_ENABLED) [[ "$value" == 0 || "$value" == 1 ]] && LED1_ENABLED="$value";;
+      LED2_ENABLED) [[ "$value" == 0 || "$value" == 1 ]] && LED2_ENABLED="$value";;
     esac
   done < "$CONFIG_FILE"
 }
@@ -111,7 +115,10 @@ while true; do
   dev2=$(slot_dev "$SLOT2_PATH")
 
   # SLOT1
-  if [[ -n "$dev1" && -e "/sys/block/$dev1/stat" ]]; then
+  if (( LED1_ENABLED != 1 )); then
+    led_off "$R1"; led_off "$G1"; prev1=0
+    smart_bad1=0; smart_sleep1=0; last_smart_check1=0; last_power_check1=0
+  elif [[ -n "$dev1" && -e "/sys/block/$dev1/stat" ]]; then
     io1=$(awk '{print $1+$5}' "/sys/block/$dev1/stat" 2>/dev/null || echo 0)
     now=$(date +%s)
     if (( now - last_power_check1 >= POWER_CHECK_INTERVAL )); then
@@ -167,7 +174,10 @@ while true; do
   fi
 
   # SLOT2
-  if [[ -n "$dev2" && -e "/sys/block/$dev2/stat" ]]; then
+  if (( LED2_ENABLED != 1 )); then
+    led_off "$R2"; led_off "$G2"; prev2=0
+    smart_bad2=0; smart_sleep2=0; last_smart_check2=0; last_power_check2=0
+  elif [[ -n "$dev2" && -e "/sys/block/$dev2/stat" ]]; then
     io2=$(awk '{print $1+$5}' "/sys/block/$dev2/stat" 2>/dev/null || echo 0)
     now=$(date +%s)
     if (( now - last_power_check2 >= POWER_CHECK_INTERVAL )); then

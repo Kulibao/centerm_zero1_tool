@@ -81,6 +81,12 @@ fi
 if [[ ! -f /etc/zero1-tool/sata-led.conf ]]; then
   install -m 644 "${DIR}/sata-led.conf" /etc/zero1-tool/sata-led.conf
 fi
+if ! grep -q '^LED1_ENABLED=' /etc/zero1-tool/sata-led.conf; then
+  printf 'LED1_ENABLED=1\n' >> /etc/zero1-tool/sata-led.conf
+fi
+if ! grep -q '^LED2_ENABLED=' /etc/zero1-tool/sata-led.conf; then
+  printf 'LED2_ENABLED=1\n' >> /etc/zero1-tool/sata-led.conf
+fi
 if [[ ! -f /etc/zero1-tool/buzzer.conf ]]; then
   install -m 644 "${DIR}/buzzer.conf" /etc/zero1-tool/buzzer.conf
 fi
