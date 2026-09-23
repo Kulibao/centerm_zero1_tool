@@ -4,11 +4,19 @@
 
 修改于铁牛官方提供的驱动文件。
 
-当前版本号：`2609222121`
+当前版本号：`2609232006`
 
 最新版本：[GitHub 项目仓库](https://github.com/Kulibao/centerm_zero1_tool)
 
 仓库根目录只保留本说明文件和完整工具目录 `Zero1_tool_install/`。使用时请将该目录复制到 NAS 的 `/home/anna/Zero1_tool_install`。
+
+## Zero1_tool_fpk 飞牛应用
+
+`Zero1_tool_fpk/` 是铁牛 Zero1 Tool 的飞牛 fnOS FPK 应用版本，当前应用版本为 `1.0.1`。
+
+这个应用本身不负责安装或运行驱动修复脚本，也不会替代 SSH 版工具。安装前请先按照上面的步骤安装并运行 `Zero1_tool_install`，确保 NAS 上的网页后台服务已经启动。安装 FPK 后，可以直接从飞牛桌面打开应用，在飞牛窗口内访问 `9511` 端口的铁牛 Zero1 Tool 网页后台。
+
+FPK 应用目录中的桌面入口、应用图标和生命周期脚本只用于飞牛应用集成；原有风扇、指示灯、内核、NPU、eMMC 等功能仍由 `/home/anna/Zero1_tool_install/` 提供。
 
 ## 目录结构
 
@@ -30,7 +38,7 @@
 - `fan-control.conf`：风扇温控配置模板。
 - `LOG_RETENTION_DAYS`：风扇日志按天归档后的保留天数，默认 3 天，可在网页“日志设置”中调整为 1-30 天。
 - `LOG_ENABLED`：风扇日志开关，默认开启；关闭后不再写入新的风扇日志。
-- `sata-led.conf`：SATA 指示灯配置模板，可控制硬盘休眠时是否慢闪。
+- `sata-led.conf`：电源灯和双盘位 SATA 指示灯配置模板。
 - `buzzer.conf`：开机蜂鸣开关的配置模板。
 - `original_files/`：为铁牛官方驱动文件，不能删除。
 
@@ -81,7 +89,7 @@ http://NAS_IP:9511/
 
 网页“日志设置”可以关闭日志，或在确认后删除当前日志及全部按天归档；删除操作不可恢复。
 
-在“SATA 指示灯”区域可以选择硬盘休眠时绿色灯是否一亮一灭。关闭后休眠盘显示绿色常亮，其他 SATA 灯状态不变。
+在“指示灯”区域可以单独关闭电源灯或任一硬盘盘位的指示灯，也可以设置硬盘休眠时绿色灯慢闪。还可以启用每日定时关闭，选择开始和结束时间及目标灯；默认关闭此功能，默认目标是两盏 SATA 灯。时间段可以跨越午夜，结束后指示灯自动恢复。设置保存在 NAS 上并由所有访问网页的设备共用。
 
 在“蜂鸣器”区域可以开启或关闭开机蜂鸣，可以使用“响一声测试”检查蜂鸣器。
 
@@ -135,4 +143,4 @@ tail -n 80 /var/log/fan_control.log
 ```
 
 网页服务文件位于 `/usr/local/lib/zero1-tool/www/`，风扇配置位于 `/etc/zero1-tool/fan.conf`。
-SATA 指示灯配置位于 `/etc/zero1-tool/sata-led.conf`。
+电源灯和 SATA 指示灯配置位于 `/etc/zero1-tool/sata-led.conf`。

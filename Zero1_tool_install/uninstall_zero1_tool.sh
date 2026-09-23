@@ -22,6 +22,8 @@ fi
 systemctl disable --now zero1-tool-httpd.service 2>/dev/null || true
 systemctl disable --now fan-control.service 2>/dev/null || true
 systemctl disable --now zero1-lvm-activate.service 2>/dev/null || true
+systemctl disable --now power-led-solid.service 2>/dev/null || true
+systemctl disable --now sata-led-manager.service 2>/dev/null || true
 
 # Remove the post-install hooks and standalone configuration files created by
 # the Zero1tool kernel/NPU repair scripts. Kernel images and initramfs images

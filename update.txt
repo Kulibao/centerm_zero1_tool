@@ -1,3 +1,3 @@
 # Zero1 Tool update manifest
-latest_version=2609222121
-download_url=https://github.com/Kulibao/centerm_zero1_tool/releases/download/Zero1_tool_2609222121/Zero1_tool_2609222121.zip
+latest_version=2609232006
+download_url=https://github.com/Kulibao/centerm_zero1_tool/releases/download/Zero1_tool_2609232006/Zero1_tool_2609232006.zip

@@ -1,0 +1,17 @@
+#!/bin/bash
+case "$1" in
+  start)
+    # The web service is installed and managed separately.
+    exit 0
+    ;;
+  stop)
+    exit 0
+    ;;
+  status)
+    # Keep the launcher registered while the external web service is managed separately.
+    exit 0
+    ;;
+  *)
+    exit 1
+    ;;
+esac

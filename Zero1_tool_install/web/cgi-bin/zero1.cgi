@@ -2,7 +2,7 @@
 set -eu
 
 CONFIG=/etc/zero1-tool/fan.conf
-CURRENT_VERSION=2609222121
+CURRENT_VERSION=2609232006
 UPDATE_MANIFEST_URL=https://gitee.com/kulibaoa/centerm_zero1_tool/raw/master/update.txt
 UPDATE_MANIFEST_GITEE_URL=https://gitee.com/kulibaoa/centerm_zero1_tool/raw/master/update.txt
 SATA_CONFIG=/etc/zero1-tool/sata-led.conf
@@ -36,6 +36,7 @@ get_sata_value() { sed -n "s/^$1=//p" "$SATA_CONFIG" 2>/dev/null | tail -n 1; }
 get_buzzer_value() { sed -n "s/^$1=//p" "$BUZZER_CONFIG" 2>/dev/null | tail -n 1; }
 is_uint() { case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac; }
 in_range() { is_uint "$1" && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
+valid_time() { case "$1" in [01][0-9]:[0-5][0-9]|2[0-3]:[0-5][0-9]) return 0;; *) return 1;; esac; }
 normalize_mac() {
   # Accept the normal colon form plus URL-encoded colons.  Building the
   # canonical value here avoids ash/locale pattern differences and also
@@ -405,8 +406,17 @@ case "$action" in
     led1_enabled="$(get_sata_value LED1_ENABLED)"; [ "$led1_enabled" = 0 ] || led1_enabled=1
     led2_enabled="$(get_sata_value LED2_ENABLED)"; [ "$led2_enabled" = 0 ] || led2_enabled=1
     standby_blink="$(get_sata_value STANDBY_BLINK)"; [ "$standby_blink" = 0 ] || standby_blink=1
-    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","ALWAYS_ON":"%s","IDLE_DUTY_PERCENT":"%s","CHECK_INTERVAL":"%s","LOG_RETENTION_DAYS":"%s","LOG_ENABLED":"%s","STANDBY_BLINK":"%s","SATA_LED1_ENABLED":"%s","SATA_LED2_ENABLED":"%s","BOOT_BEEP":"%s"}\n' \
-      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$always_on" "$idle_duty" "$(get_value CHECK_INTERVAL)" "$retention" "$enabled" "$standby_blink" "$led1_enabled" "$led2_enabled" "$(get_buzzer_value BOOT_BEEP)"
+    power_led_enabled="$(get_sata_value POWER_LED_ENABLED)"; [ "$power_led_enabled" = 0 ] || power_led_enabled=1
+    schedule_enabled="$(get_sata_value LED_SCHEDULE_ENABLED)"; [ "$schedule_enabled" = 1 ] || schedule_enabled=0
+    schedule_start="$(get_sata_value LED_SCHEDULE_START)"; valid_time "$schedule_start" || schedule_start=23:00
+    schedule_end="$(get_sata_value LED_SCHEDULE_END)"; valid_time "$schedule_end" || schedule_end=07:00
+    schedule_power="$(get_sata_value LED_SCHEDULE_POWER)"; [ "$schedule_power" = 1 ] || schedule_power=0
+    schedule_sata1="$(get_sata_value LED_SCHEDULE_SATA1)"; [ "$schedule_sata1" = 0 ] || schedule_sata1=1
+    schedule_sata2="$(get_sata_value LED_SCHEDULE_SATA2)"; [ "$schedule_sata2" = 0 ] || schedule_sata2=1
+    printf '{"MODE":"%s","MANUAL_SPEED":"%s","TEMP_OFF":"%s","TEMP_LOW":"%s","TEMP_FULL":"%s","TEMP_CRITICAL":"%s","FAN_DUTY_MIN":"%s","ALWAYS_ON":"%s","IDLE_DUTY_PERCENT":"%s","CHECK_INTERVAL":"%s","LOG_RETENTION_DAYS":"%s","LOG_ENABLED":"%s","STANDBY_BLINK":"%s","SATA_LED1_ENABLED":"%s","SATA_LED2_ENABLED":"%s","POWER_LED_ENABLED":"%s",' \
+      "$(get_value MODE)" "$(get_value MANUAL_SPEED)" "$(get_value TEMP_OFF)" "$(get_value TEMP_LOW)" "$(get_value TEMP_FULL)" "$(get_value TEMP_CRITICAL)" "$(get_value FAN_DUTY_MIN)" "$always_on" "$idle_duty" "$(get_value CHECK_INTERVAL)" "$retention" "$enabled" "$standby_blink" "$led1_enabled" "$led2_enabled" "$power_led_enabled"
+    printf '"LED_SCHEDULE_ENABLED":"%s","LED_SCHEDULE_START":"%s","LED_SCHEDULE_END":"%s","LED_SCHEDULE_POWER":"%s","LED_SCHEDULE_SATA1":"%s","LED_SCHEDULE_SATA2":"%s","BOOT_BEEP":"%s"}\n' \
+      "$schedule_enabled" "$schedule_start" "$schedule_end" "$schedule_power" "$schedule_sata1" "$schedule_sata2" "$(get_buzzer_value BOOT_BEEP)"
     ;;
   mac_config)
     header
@@ -517,9 +527,13 @@ case "$action" in
     SATA_STANDBY_BLINK="$(get_sata_value STANDBY_BLINK)"
     SATA_LED1_ENABLED="$(get_sata_value LED1_ENABLED)"
     SATA_LED2_ENABLED="$(get_sata_value LED2_ENABLED)"
+    POWER_LED_ENABLED="$(get_sata_value POWER_LED_ENABLED)"
+    LED_SCHEDULE_ENABLED="$(get_sata_value LED_SCHEDULE_ENABLED)"
     [ "$SATA_STANDBY_BLINK" = 0 ] || SATA_STANDBY_BLINK=1
     [ "$SATA_LED1_ENABLED" = 0 ] || SATA_LED1_ENABLED=1
     [ "$SATA_LED2_ENABLED" = 0 ] || SATA_LED2_ENABLED=1
+    [ "$POWER_LED_ENABLED" = 0 ] || POWER_LED_ENABLED=1
+    [ "$LED_SCHEDULE_ENABLED" = 1 ] || LED_SCHEDULE_ENABLED=0
     oldifs=$IFS; IFS='&'
     for item in $body; do
       key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
@@ -527,12 +541,27 @@ case "$action" in
         SATA_STANDBY_BLINK) SATA_STANDBY_BLINK="$value";;
         SATA_LED1_ENABLED) SATA_LED1_ENABLED="$value";;
         SATA_LED2_ENABLED) SATA_LED2_ENABLED="$value";;
+        POWER_LED_ENABLED) POWER_LED_ENABLED="$value";;
+        LED_SCHEDULE_ENABLED) LED_SCHEDULE_ENABLED="$value";;
       esac
     done
     IFS=$oldifs
     [ "$SATA_STANDBY_BLINK" = 0 ] || [ "$SATA_STANDBY_BLINK" = 1 ] || error '休眠闪烁开关无效'
     [ "$SATA_LED1_ENABLED" = 0 ] || [ "$SATA_LED1_ENABLED" = 1 ] || error '硬盘1指示灯开关无效'
     [ "$SATA_LED2_ENABLED" = 0 ] || [ "$SATA_LED2_ENABLED" = 1 ] || error '硬盘2指示灯开关无效'
+    [ "$POWER_LED_ENABLED" = 0 ] || [ "$POWER_LED_ENABLED" = 1 ] || error '电源指示灯开关无效'
+    [ "$LED_SCHEDULE_ENABLED" = 0 ] || [ "$LED_SCHEDULE_ENABLED" = 1 ] || error '定时关闭指示灯开关无效'
+    if [ "$LED_SCHEDULE_ENABLED" = 1 ]; then
+      schedule_start="$(get_sata_value LED_SCHEDULE_START)"
+      schedule_end="$(get_sata_value LED_SCHEDULE_END)"
+      valid_time "$schedule_start" || error '请先在设置中保存有效的定时开始时间'
+      valid_time "$schedule_end" || error '请先在设置中保存有效的定时结束时间'
+      [ "$schedule_start" != "$schedule_end" ] || error '定时关闭的开始和结束时间不能相同'
+      schedule_power="$(get_sata_value LED_SCHEDULE_POWER)"
+      schedule_sata1="$(get_sata_value LED_SCHEDULE_SATA1)"
+      schedule_sata2="$(get_sata_value LED_SCHEDULE_SATA2)"
+      [ "$schedule_power" = 1 ] || [ "$schedule_sata1" = 1 ] || [ "$schedule_sata2" = 1 ] || error '请先在设置中至少选择一个要关闭的指示灯'
+    fi
     mkdir -p /etc/zero1-tool
     sata_tmp="${SATA_CONFIG}.tmp.$$"
     {
@@ -540,8 +569,64 @@ case "$action" in
       echo "STANDBY_BLINK=$SATA_STANDBY_BLINK"
       echo "LED1_ENABLED=$SATA_LED1_ENABLED"
       echo "LED2_ENABLED=$SATA_LED2_ENABLED"
+      echo "POWER_LED_ENABLED=$POWER_LED_ENABLED"
+      echo "LED_SCHEDULE_ENABLED=$LED_SCHEDULE_ENABLED"
+      echo "LED_SCHEDULE_START=$(get_sata_value LED_SCHEDULE_START)"
+      echo "LED_SCHEDULE_END=$(get_sata_value LED_SCHEDULE_END)"
+      echo "LED_SCHEDULE_POWER=$(get_sata_value LED_SCHEDULE_POWER)"
+      echo "LED_SCHEDULE_SATA1=$(get_sata_value LED_SCHEDULE_SATA1)"
+      echo "LED_SCHEDULE_SATA2=$(get_sata_value LED_SCHEDULE_SATA2)"
     } > "$sata_tmp"
     mv "$sata_tmp" "$SATA_CONFIG"
+    systemctl restart power-led-solid.service 2>/dev/null || true
+    systemctl kill -s HUP sata-led-manager.service 2>/dev/null || systemctl restart sata-led-manager.service 2>/dev/null || true
+    header; printf '{"ok":true}\n'
+    ;;
+  save_led_schedule)
+    [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
+    length=${CONTENT_LENGTH:-0}; in_range "$length" 1 1024 || error '请求大小无效'
+    body=$(dd bs=1 count="$length" 2>/dev/null)
+    LED_SCHEDULE_START="$(get_sata_value LED_SCHEDULE_START)"; valid_time "$LED_SCHEDULE_START" || LED_SCHEDULE_START=23:00
+    LED_SCHEDULE_END="$(get_sata_value LED_SCHEDULE_END)"; valid_time "$LED_SCHEDULE_END" || LED_SCHEDULE_END=07:00
+    LED_SCHEDULE_POWER="$(get_sata_value LED_SCHEDULE_POWER)"; [ "$LED_SCHEDULE_POWER" = 1 ] || LED_SCHEDULE_POWER=0
+    LED_SCHEDULE_SATA1="$(get_sata_value LED_SCHEDULE_SATA1)"; [ "$LED_SCHEDULE_SATA1" = 0 ] || LED_SCHEDULE_SATA1=1
+    LED_SCHEDULE_SATA2="$(get_sata_value LED_SCHEDULE_SATA2)"; [ "$LED_SCHEDULE_SATA2" = 0 ] || LED_SCHEDULE_SATA2=1
+    oldifs=$IFS; IFS='&'
+    for item in $body; do
+      key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
+      case "$key" in
+        LED_SCHEDULE_START) LED_SCHEDULE_START="$value";;
+        LED_SCHEDULE_END) LED_SCHEDULE_END="$value";;
+        LED_SCHEDULE_POWER) LED_SCHEDULE_POWER="$value";;
+        LED_SCHEDULE_SATA1) LED_SCHEDULE_SATA1="$value";;
+        LED_SCHEDULE_SATA2) LED_SCHEDULE_SATA2="$value";;
+      esac
+    done
+    IFS=$oldifs
+    valid_time "$LED_SCHEDULE_START" || error '定时关闭开始时间无效'
+    valid_time "$LED_SCHEDULE_END" || error '定时关闭结束时间无效'
+    [ "$(get_sata_value LED_SCHEDULE_ENABLED)" != 1 ] || [ "$LED_SCHEDULE_START" != "$LED_SCHEDULE_END" ] || error '定时关闭的开始和结束时间不能相同'
+    [ "$LED_SCHEDULE_POWER" = 0 ] || [ "$LED_SCHEDULE_POWER" = 1 ] || error '电源灯定时选项无效'
+    [ "$LED_SCHEDULE_SATA1" = 0 ] || [ "$LED_SCHEDULE_SATA1" = 1 ] || error '硬盘1定时选项无效'
+    [ "$LED_SCHEDULE_SATA2" = 0 ] || [ "$LED_SCHEDULE_SATA2" = 1 ] || error '硬盘2定时选项无效'
+    [ "$(get_sata_value LED_SCHEDULE_ENABLED)" != 1 ] || [ "$LED_SCHEDULE_POWER" = 1 ] || [ "$LED_SCHEDULE_SATA1" = 1 ] || [ "$LED_SCHEDULE_SATA2" = 1 ] || error '定时启用时至少选择一个指示灯'
+    mkdir -p /etc/zero1-tool
+    sata_tmp="${SATA_CONFIG}.tmp.$$"
+    {
+      echo '# Managed by T-NAS Zero1tool'
+      echo "STANDBY_BLINK=$(get_sata_value STANDBY_BLINK)"
+      echo "LED1_ENABLED=$(get_sata_value LED1_ENABLED)"
+      echo "LED2_ENABLED=$(get_sata_value LED2_ENABLED)"
+      echo "POWER_LED_ENABLED=$(get_sata_value POWER_LED_ENABLED)"
+      echo "LED_SCHEDULE_ENABLED=$(get_sata_value LED_SCHEDULE_ENABLED)"
+      echo "LED_SCHEDULE_START=$LED_SCHEDULE_START"
+      echo "LED_SCHEDULE_END=$LED_SCHEDULE_END"
+      echo "LED_SCHEDULE_POWER=$LED_SCHEDULE_POWER"
+      echo "LED_SCHEDULE_SATA1=$LED_SCHEDULE_SATA1"
+      echo "LED_SCHEDULE_SATA2=$LED_SCHEDULE_SATA2"
+    } > "$sata_tmp"
+    mv "$sata_tmp" "$SATA_CONFIG"
+    systemctl restart power-led-solid.service 2>/dev/null || true
     systemctl kill -s HUP sata-led-manager.service 2>/dev/null || systemctl restart sata-led-manager.service 2>/dev/null || true
     header; printf '{"ok":true}\n'
     ;;
@@ -620,7 +705,7 @@ case "$action" in
     [ "${REQUEST_METHOD:-}" = POST ] || error '只允许POST请求'
     length=${CONTENT_LENGTH:-0}; in_range "$length" 1 8192 || error '请求大小无效'
     body=$(dd bs=1 count="$length" 2>/dev/null)
-    MODE=''; MANUAL_SPEED=''; TEMP_OFF=''; TEMP_LOW=''; TEMP_FULL=''; TEMP_CRITICAL=''; FAN_DUTY_MIN=''; CHECK_INTERVAL=''; SATA_STANDBY_BLINK="$(get_sata_value STANDBY_BLINK)"; SATA_LED1_ENABLED="$(get_sata_value LED1_ENABLED)"; SATA_LED2_ENABLED="$(get_sata_value LED2_ENABLED)"
+    MODE=''; MANUAL_SPEED=''; TEMP_OFF=''; TEMP_LOW=''; TEMP_FULL=''; TEMP_CRITICAL=''; FAN_DUTY_MIN=''; CHECK_INTERVAL=''
     ALWAYS_ON="$(get_value ALWAYS_ON)"
     [ "$ALWAYS_ON" = 0 ] || [ "$ALWAYS_ON" = 1 ] || ALWAYS_ON=1
     IDLE_DUTY_PERCENT="$(get_value IDLE_DUTY_PERCENT)"
@@ -629,14 +714,11 @@ case "$action" in
     in_range "$LOG_RETENTION_DAYS" 1 30 || LOG_RETENTION_DAYS=3
     LOG_ENABLED="$(get_value LOG_ENABLED)"
     [ "$LOG_ENABLED" = 0 ] || [ "$LOG_ENABLED" = 1 ] || LOG_ENABLED=1
-    [ "$SATA_STANDBY_BLINK" = 0 ] || SATA_STANDBY_BLINK=1
-    [ "$SATA_LED1_ENABLED" = 0 ] || SATA_LED1_ENABLED=1
-    [ "$SATA_LED2_ENABLED" = 0 ] || SATA_LED2_ENABLED=1
     oldifs=$IFS; IFS='&'
     for item in $body; do
       key=${item%%=*}; value=${item#*=}; value=$(urldecode "$value")
       case "$key" in
-        MODE) MODE="$value";; MANUAL_SPEED) MANUAL_SPEED="$value";; TEMP_OFF) TEMP_OFF="$value";; TEMP_LOW) TEMP_LOW="$value";; TEMP_FULL) TEMP_FULL="$value";; TEMP_CRITICAL) TEMP_CRITICAL="$value";; FAN_DUTY_MIN) FAN_DUTY_MIN="$value";; ALWAYS_ON) ALWAYS_ON="$value";; IDLE_DUTY_PERCENT) IDLE_DUTY_PERCENT="$value";; CHECK_INTERVAL) CHECK_INTERVAL="$value";; SATA_STANDBY_BLINK) SATA_STANDBY_BLINK="$value";; SATA_LED1_ENABLED) SATA_LED1_ENABLED="$value";; SATA_LED2_ENABLED) SATA_LED2_ENABLED="$value";;
+        MODE) MODE="$value";; MANUAL_SPEED) MANUAL_SPEED="$value";; TEMP_OFF) TEMP_OFF="$value";; TEMP_LOW) TEMP_LOW="$value";; TEMP_FULL) TEMP_FULL="$value";; TEMP_CRITICAL) TEMP_CRITICAL="$value";; FAN_DUTY_MIN) FAN_DUTY_MIN="$value";; ALWAYS_ON) ALWAYS_ON="$value";; IDLE_DUTY_PERCENT) IDLE_DUTY_PERCENT="$value";; CHECK_INTERVAL) CHECK_INTERVAL="$value";;
       esac
     done
     IFS=$oldifs
@@ -650,9 +732,6 @@ case "$action" in
     [ "$ALWAYS_ON" = 0 ] || [ "$ALWAYS_ON" = 1 ] || error '风扇始终运行开关无效'
     in_range "$IDLE_DUTY_PERCENT" 10 40 || error '低温运行功率必须是10到40'
     in_range "$CHECK_INTERVAL" 1 30 || error '检测间隔必须是1到30秒'
-    [ "$SATA_STANDBY_BLINK" = 0 ] || [ "$SATA_STANDBY_BLINK" = 1 ] || error '休眠闪烁开关无效'
-    [ "$SATA_LED1_ENABLED" = 0 ] || [ "$SATA_LED1_ENABLED" = 1 ] || error '硬盘1指示灯开关无效'
-    [ "$SATA_LED2_ENABLED" = 0 ] || [ "$SATA_LED2_ENABLED" = 1 ] || error '硬盘2指示灯开关无效'
     [ "$TEMP_OFF" -lt "$TEMP_LOW" ] && [ "$TEMP_LOW" -lt "$TEMP_FULL" ] && [ "$TEMP_FULL" -le "$TEMP_CRITICAL" ] || error '温度阈值必须依次升高'
     mkdir -p /etc/zero1-tool
     tmp="${CONFIG}.tmp.$$"
@@ -663,16 +742,7 @@ case "$action" in
       echo "STARTUP_SPEED=$(get_value STARTUP_SPEED)"; echo "STARTUP_HOLD=$(get_value STARTUP_HOLD)"
     } > "$tmp"
     mv "$tmp" "$CONFIG"
-    sata_tmp="${SATA_CONFIG}.tmp.$$"
-    {
-      echo '# Managed by T-NAS Zero1tool'
-      echo "STANDBY_BLINK=$SATA_STANDBY_BLINK"
-      echo "LED1_ENABLED=$SATA_LED1_ENABLED"
-      echo "LED2_ENABLED=$SATA_LED2_ENABLED"
-    } > "$sata_tmp"
-    mv "$sata_tmp" "$SATA_CONFIG"
     systemctl kill -s HUP fan-control.service 2>/dev/null || systemctl restart fan-control.service 2>/dev/null || true
-    systemctl kill -s HUP sata-led-manager.service 2>/dev/null || systemctl restart sata-led-manager.service 2>/dev/null || true
     header; printf '{"ok":true}\n'
     ;;
   *) error '接口不存在';;

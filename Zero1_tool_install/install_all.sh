@@ -87,6 +87,27 @@ fi
 if ! grep -q '^LED2_ENABLED=' /etc/zero1-tool/sata-led.conf; then
   printf 'LED2_ENABLED=1\n' >> /etc/zero1-tool/sata-led.conf
 fi
+if ! grep -q '^POWER_LED_ENABLED=' /etc/zero1-tool/sata-led.conf; then
+  printf 'POWER_LED_ENABLED=1\n' >> /etc/zero1-tool/sata-led.conf
+fi
+if ! grep -q '^LED_SCHEDULE_ENABLED=' /etc/zero1-tool/sata-led.conf; then
+  printf 'LED_SCHEDULE_ENABLED=0\n' >> /etc/zero1-tool/sata-led.conf
+fi
+if ! grep -q '^LED_SCHEDULE_START=' /etc/zero1-tool/sata-led.conf; then
+  printf 'LED_SCHEDULE_START=23:00\n' >> /etc/zero1-tool/sata-led.conf
+fi
+if ! grep -q '^LED_SCHEDULE_END=' /etc/zero1-tool/sata-led.conf; then
+  printf 'LED_SCHEDULE_END=07:00\n' >> /etc/zero1-tool/sata-led.conf
+fi
+if ! grep -q '^LED_SCHEDULE_POWER=' /etc/zero1-tool/sata-led.conf; then
+  printf 'LED_SCHEDULE_POWER=0\n' >> /etc/zero1-tool/sata-led.conf
+fi
+if ! grep -q '^LED_SCHEDULE_SATA1=' /etc/zero1-tool/sata-led.conf; then
+  printf 'LED_SCHEDULE_SATA1=1\n' >> /etc/zero1-tool/sata-led.conf
+fi
+if ! grep -q '^LED_SCHEDULE_SATA2=' /etc/zero1-tool/sata-led.conf; then
+  printf 'LED_SCHEDULE_SATA2=1\n' >> /etc/zero1-tool/sata-led.conf
+fi
 if [[ ! -f /etc/zero1-tool/buzzer.conf ]]; then
   install -m 644 "${DIR}/buzzer.conf" /etc/zero1-tool/buzzer.conf
 fi
@@ -129,9 +150,10 @@ rm -f /etc/systemd/system/zero1-tool.service
 systemctl daemon-reload
 
 systemctl enable --now beep-boot.service
-systemctl enable --now power-led-solid.service
+systemctl enable power-led-solid.service
+systemctl restart power-led-solid.service
 systemctl enable --now sata-led-enable.service
-systemctl enable --now sata-led-manager.service
+systemctl restart sata-led-manager.service
 systemctl disable --now fan-control.service 2>/dev/null || true
 systemctl enable --now fan-control.service
 systemctl enable --now zero1-tool-httpd.service

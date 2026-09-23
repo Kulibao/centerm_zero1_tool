@@ -15,10 +15,20 @@ LOOP_INTERVAL=0.2          # faster activity sampling / green LED flash rate
 SLOW_BLINK_TICKS=5         # 5 x 0.2s on, 5 x 0.2s off = approximately 0.5Hz
 HDPARM=/sbin/hdparm
 CONFIG_FILE=/etc/zero1-tool/sata-led.conf
+FAN_CONFIG_FILE=/etc/zero1-tool/fan.conf
+SCHEDULE_CHECK_INTERVAL=3
 STANDBY_BLINK=1
 LED1_ENABLED=1
 LED2_ENABLED=1
+LED_SCHEDULE_ENABLED=0
+LED_SCHEDULE_START=23:00
+LED_SCHEDULE_END=07:00
+LED_SCHEDULE_SATA1=1
+LED_SCHEDULE_SATA2=1
 RELOAD_CONFIG=0
+SCHEDULE_ACTIVE=0
+LAST_SCHEDULE_CHECK=0
+LAST_INTERVAL_CONFIG_REFRESH=0
 
 SLOT1_PATH="/sys/devices/platform/fc400000.sata/ata*/host*/target*:*:*/*:*:*:*/block"
 SLOT2_PATH="/sys/devices/platform/fc800000.sata/ata*/host*/target*:*:*/*:*:*:*/block"
@@ -33,11 +43,57 @@ load_config() {
       STANDBY_BLINK) [[ "$value" == 0 || "$value" == 1 ]] && STANDBY_BLINK="$value";;
       LED1_ENABLED) [[ "$value" == 0 || "$value" == 1 ]] && LED1_ENABLED="$value";;
       LED2_ENABLED) [[ "$value" == 0 || "$value" == 1 ]] && LED2_ENABLED="$value";;
+      LED_SCHEDULE_ENABLED) [[ "$value" == 0 || "$value" == 1 ]] && LED_SCHEDULE_ENABLED="$value";;
+      LED_SCHEDULE_START) LED_SCHEDULE_START="$value";;
+      LED_SCHEDULE_END) LED_SCHEDULE_END="$value";;
+      LED_SCHEDULE_SATA1) [[ "$value" == 0 || "$value" == 1 ]] && LED_SCHEDULE_SATA1="$value";;
+      LED_SCHEDULE_SATA2) [[ "$value" == 0 || "$value" == 1 ]] && LED_SCHEDULE_SATA2="$value";;
     esac
   done < "$CONFIG_FILE"
 }
 
 handle_hup() { RELOAD_CONFIG=1; }
+
+load_schedule_interval() {
+  local key value next_interval=3 previous_interval="$SCHEDULE_CHECK_INTERVAL"
+  [ -r "$FAN_CONFIG_FILE" ] || return 0
+  while IFS='=' read -r key value; do
+    if [[ "$key" == CHECK_INTERVAL && "$value" =~ ^[0-9]+$ ]]; then
+      local parsed_interval=$((10#$value))
+      if (( parsed_interval >= 1 && parsed_interval <= 30 )); then
+        next_interval=$parsed_interval
+        break
+      fi
+    fi
+  done < "$FAN_CONFIG_FILE"
+  SCHEDULE_CHECK_INTERVAL=$next_interval
+  if (( SCHEDULE_CHECK_INTERVAL != previous_interval )); then LAST_SCHEDULE_CHECK=0; fi
+}
+
+refresh_schedule_state() {
+  local current_minute now_hour now_minute start_hour start_minute end_hour end_minute now_value start_value end_value
+  SCHEDULE_ACTIVE=0
+  current_minute=$(date +%H:%M)
+  [[ "$LED_SCHEDULE_ENABLED" == 1 ]] || return 0
+  [[ "$LED_SCHEDULE_START" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || return 0
+  [[ "$LED_SCHEDULE_END" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || return 0
+
+  now_hour="${current_minute%:*}"; now_minute="${current_minute#*:}"
+  start_hour="${LED_SCHEDULE_START%:*}"; start_minute="${LED_SCHEDULE_START#*:}"
+  end_hour="${LED_SCHEDULE_END%:*}"; end_minute="${LED_SCHEDULE_END#*:}"
+  now_value=$((10#$now_hour * 60 + 10#$now_minute))
+  start_value=$((10#$start_hour * 60 + 10#$start_minute))
+  end_value=$((10#$end_hour * 60 + 10#$end_minute))
+  (( start_value != end_value )) || return 0
+  if (( start_value < end_value )); then
+    (( now_value >= start_value && now_value < end_value )) && SCHEDULE_ACTIVE=1
+  else
+    (( now_value >= start_value || now_value < end_value )) && SCHEDULE_ACTIVE=1
+  fi
+  # Being outside the configured interval is a normal state.  Always return
+  # success so `set -e` cannot terminate the LED manager on that transition.
+  return 0
+}
 
 ensure_gpio_out() {
   local n="$1" G="/sys/class/gpio/gpio$1"
@@ -93,6 +149,7 @@ for g in "$R1" "$G1" "$R2" "$G2" "$SW"; do
   ensure_gpio_out "$g" || true
 done
 load_config
+load_schedule_interval
 trap handle_hup HUP
 [ -e "/sys/class/gpio/gpio$SW/value" ] && echo 1 > "/sys/class/gpio/gpio$SW/value" 2>/dev/null || true
 
@@ -113,9 +170,20 @@ while true; do
   slow_phase=$(( (tick / SLOW_BLINK_TICKS) % 2 ))
   dev1=$(slot_dev "$SLOT1_PATH")
   dev2=$(slot_dev "$SLOT2_PATH")
+  now=$(date +%s)
+  if (( now - LAST_INTERVAL_CONFIG_REFRESH >= 1 )); then
+    load_schedule_interval
+    LAST_INTERVAL_CONFIG_REFRESH=$now
+  fi
+  if (( now - LAST_SCHEDULE_CHECK >= SCHEDULE_CHECK_INTERVAL )); then
+    refresh_schedule_state
+    LAST_SCHEDULE_CHECK=$now
+  fi
 
   # SLOT1
-  if (( LED1_ENABLED != 1 )); then
+  if (( SCHEDULE_ACTIVE == 1 && LED_SCHEDULE_SATA1 == 1 )); then
+    led_off "$R1"; led_off "$G1"; prev1=0
+  elif (( LED1_ENABLED != 1 )); then
     led_off "$R1"; led_off "$G1"; prev1=0
     smart_bad1=0; smart_sleep1=0; last_smart_check1=0; last_power_check1=0
   elif [[ -n "$dev1" && -e "/sys/block/$dev1/stat" ]]; then
@@ -172,9 +240,10 @@ while true; do
     led_off "$G1"; prev1=0
     smart_bad1=0; smart_sleep1=0; last_smart_check1=0; last_power_check1=0
   fi
-
   # SLOT2
-  if (( LED2_ENABLED != 1 )); then
+  if (( SCHEDULE_ACTIVE == 1 && LED_SCHEDULE_SATA2 == 1 )); then
+    led_off "$R2"; led_off "$G2"; prev2=0
+  elif (( LED2_ENABLED != 1 )); then
     led_off "$R2"; led_off "$G2"; prev2=0
     smart_bad2=0; smart_sleep2=0; last_smart_check2=0; last_power_check2=0
   elif [[ -n "$dev2" && -e "/sys/block/$dev2/stat" ]]; then
@@ -230,10 +299,12 @@ while true; do
     led_off "$G2"; prev2=0
     smart_bad2=0; smart_sleep2=0; last_smart_check2=0; last_power_check2=0
   fi
-
   if (( RELOAD_CONFIG == 1 )); then
     load_config
+    load_schedule_interval
     RELOAD_CONFIG=0
+    SCHEDULE_ACTIVE=0
+    LAST_SCHEDULE_CHECK=0
   fi
   sleep "$LOOP_INTERVAL"
 done

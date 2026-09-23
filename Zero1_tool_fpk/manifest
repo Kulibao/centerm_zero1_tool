@@ -1,0 +1,14 @@
+appname               = zero1_tool
+version               = 1.0.1
+display_name          = 铁牛 Zero1 Tool
+desc                  = 铁牛 Zero1 专用工具箱网页窗口入口，需先安装并运行 Zero1_tool_install 网页后台
+platform              = arm
+source                = thirdparty
+maintainer            = Kulibao
+distributor           = Kulibao
+service_port          = 9511
+checkport             = false
+disable_authorization_path = true
+desktop_uidir         = ui
+desktop_applaunchname = zero1_tool.Application
+changelog             = 初始版本：在飞牛桌面窗口内打开铁牛 Zero1tool 网页后台
